@@ -10,12 +10,48 @@ function ResponsesContent() {
   const formId = params.formId;
 
   const [selectedResponse, setSelectedResponse] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+const [dateFilter, setDateFilter] = useState("");
 
   const responsesQuery = trpc.getFormResponses.useQuery({ formId });
   const questionsQuery = trpc.getQuestionsByForm.useQuery({ formId });
 
   const responses = responsesQuery.data ?? [];
   const questions = questionsQuery.data ?? [];
+
+  const filteredResponses = responses.filter((response) => {
+  const answers = response.answers as Record<string, unknown>;
+
+  const searchableText = [
+    response.respondentEmail ?? "",
+    ...Object.values(answers).map((answer) =>
+      Array.isArray(answer)
+        ? answer.join(" ")
+        : typeof answer === "object" && answer !== null
+          ? JSON.stringify(answer)
+          : String(answer ?? "")
+    ),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  const matchesSearch = searchableText.includes(
+    searchTerm.toLowerCase().trim()
+  );
+
+  const submittedDate = new Date(response.submittedAt);
+
+  const localDate = [
+    submittedDate.getFullYear(),
+    String(submittedDate.getMonth() + 1).padStart(2, "0"),
+    String(submittedDate.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  const matchesDate =
+    !dateFilter || localDate === dateFilter;
+
+  return matchesSearch && matchesDate;
+});
 
   if (responsesQuery.isLoading || questionsQuery.isLoading) {
     return (
@@ -74,7 +110,40 @@ function ResponsesContent() {
           </span>
         </div>
 
-        {responses.length === 0 ? (
+{/* Search and Date Filters */}
+<div className="mb-5 flex flex-col gap-3 sm:flex-row">
+  <input
+    type="text"
+    placeholder="Search responses..."
+    value={searchTerm}
+    onChange={(e) => setSearchTerm(e.target.value)}
+    className="w-full rounded-lg border border-[#DED6C1] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#B7B09E]"
+  />
+
+  <input
+    type="date"
+    value={dateFilter}
+    onChange={(e) => setDateFilter(e.target.value)}
+    className="rounded-lg border border-[#DED6C1] bg-white px-4 py-3 text-sm outline-none focus:border-[#B7B09E]"
+  />
+
+  <button
+    type="button"
+    onClick={() => {
+      setSearchTerm("");
+      setDateFilter("");
+    }}
+    className="rounded-lg border border-[#DED6C1] px-4 py-3 text-sm font-medium hover:bg-[#F8F6F0]"
+  >
+    Clear
+  </button>
+</div>
+
+<p className="mb-4 text-xs text-[#777267]">
+  Showing {filteredResponses.length} of {responses.length} responses
+</p>
+
+        {filteredResponses.length === 0 ? (
           <div className="rounded-xl border border-[#DED6C1] bg-white p-12 text-center">
             <h3 className="text-lg font-semibold text-[#302E29]">
               No responses yet
@@ -85,7 +154,7 @@ function ResponsesContent() {
           </div>
         ) : (
           <div className="space-y-4">
-            {responses.map((response) => {
+            {filteredResponses.map((response) => {
               const answers = response.answers as Record<string, unknown>;
               const isSelected = selectedResponse === response.id;
 
