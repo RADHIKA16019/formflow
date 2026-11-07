@@ -1,12 +1,15 @@
 {
   "name": "formflow",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "check-types": "turbo check-types"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  },
+  "packageManager": "pnpm@12.18.0"
 }
