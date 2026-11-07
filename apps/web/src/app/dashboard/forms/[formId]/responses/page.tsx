@@ -53,6 +53,52 @@ const [dateFilter, setDateFilter] = useState("");
   return matchesSearch && matchesDate;
 });
 
+const handleExportCSV = () => {
+  const escapeCSV = (value: unknown) => {
+    const text = Array.isArray(value)
+      ? value.join(", ")
+      : typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : String(value ?? "");
+
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const headers = [
+    "Respondent Email",
+    "Submitted At",
+    ...questions.map((question) => question.title),
+  ];
+
+  const rows = filteredResponses.map((response) => {
+    const answers = response.answers as Record<string, unknown>;
+
+    return [
+      response.respondentEmail || "Anonymous",
+      new Date(response.submittedAt).toLocaleString(),
+      ...questions.map((question) => answers[question.id] ?? ""),
+    ];
+  });
+
+  const csvContent = [
+    headers.map(escapeCSV).join(","),
+    ...rows.map((row) => row.map(escapeCSV).join(",")),
+  ].join("\n");
+
+  const blob = new Blob(["\uFEFF" + csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "form-responses.csv";
+  link.click();
+
+  URL.revokeObjectURL(url);
+};
+
   if (responsesQuery.isLoading || questionsQuery.isLoading) {
     return (
       <div className="p-10 text-center text-[#777267]">
@@ -100,15 +146,26 @@ const [dateFilter, setDateFilter] = useState("");
           </h2>
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-[#302E29]">
-            All Submissions
-          </h2>
+<div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h2 className="text-xl font-semibold text-[#302E29]">
+      All Submissions
+    </h2>
 
-          <span className="text-sm text-[#777267]">
-            {responses.length} responses
-          </span>
-        </div>
+    <span className="text-sm text-[#777267]">
+      {responses.length} responses
+    </span>
+  </div>
+
+  <button
+    type="button"
+    onClick={handleExportCSV}
+    disabled={filteredResponses.length === 0}
+    className="rounded-lg bg-[#302E29] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#49453D] disabled:cursor-not-allowed disabled:opacity-40"
+  >
+    ↓ Export CSV
+  </button>
+</div>
 
 {/* Search and Date Filters */}
 <div className="mb-5 flex flex-col gap-3 sm:flex-row">
