@@ -6,6 +6,7 @@ import {
   desc,
   asc,
   sql,
+  count,
 } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -225,6 +226,19 @@ export const appRouter = t.router({
       .from(forms)
       .where(eq(forms.ownerId, ctx.session.user.id))
       .orderBy(desc(forms.createdAt));
+  }),
+
+  getTotalResponses: protectedProcedure
+  .query(async ({ ctx }) => {
+    const [result] = await db
+      .select({
+        total: count(responses.id),
+      })
+      .from(responses)
+      .innerJoin(forms, eq(responses.formId, forms.id))
+      .where(eq(forms.ownerId, ctx.session.user.id));
+
+    return result.total;
   }),
 
   getFormResponses: protectedProcedure

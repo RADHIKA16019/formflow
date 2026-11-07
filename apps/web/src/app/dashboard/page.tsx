@@ -44,6 +44,14 @@ export default function DashboardPage() {
     enabled: !!session,
   });
 
+  // Fetch total responses across all user's forms
+const {
+  data: totalResponses,
+  isLoading: areResponsesLoading,
+} = trpc.getTotalResponses.useQuery(undefined, {
+  enabled: !!session,
+});
+
   // tRPC utilities for refreshing queries
   const utils = trpc.useUtils();
 
@@ -105,10 +113,12 @@ export default function DashboardPage() {
       description: "Forms created",
     },
     {
-      label: "Total Responses",
-      value: "0",
-      description: "Responses received",
-    },
+  label: "Total Responses",
+  value: areResponsesLoading
+    ? "..."
+    : String(totalResponses ?? 0),
+  description: "Responses received",
+},
     {
       label: "Published Forms",
       value: areFormsLoading ? "..." : String(publishedForms),
