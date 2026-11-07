@@ -278,9 +278,10 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 {recentForms.map((form) => (
-                  <div
+                  <Link
                     key={form.id}
-                    className="flex flex-col justify-between gap-3 rounded-xl border border-border bg-white p-5 sm:flex-row sm:items-center"
+                    href={`/dashboard/forms/${form.id}`}
+                    className="flex flex-col justify-between gap-3 rounded-xl border border-border bg-white p-5 transition hover:border-[#B7B09E] sm:flex-row sm:items-center"
                   >
                     <div>
                       <h3 className="font-semibold">
@@ -308,7 +309,7 @@ export default function DashboardPage() {
                     >
                       {form.status}
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
