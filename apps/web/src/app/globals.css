@@ -1,26 +1,54 @@
+
 @import "tailwindcss";
 
+/* FormFlow Design System */
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #302e29;
+
+  /* Brand palette */
+  --cream: #EBE2CC;
+  --sand: #DED6C1;
+  --beige: #CFC6B1;
+  --stone: #B7B09E;
+
+  /* UI colors */
+  --muted: #77746c;
+  --border: #eeeae2;
+  --card: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  --color-cream: var(--cream);
+  --color-sand: var(--sand);
+  --color-beige: var(--beige);
+  --color-stone: var(--stone);
+
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card: var(--card);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Global styles */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
