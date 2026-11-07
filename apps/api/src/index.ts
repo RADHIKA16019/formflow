@@ -1,6 +1,9 @@
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { appRouter } from "./trpc/router.js";
 
 dotenv.config();
 
@@ -15,6 +18,14 @@ app.get("/", (_req, res) => {
     message: "Welcome to FormFlow API!",
   });
 });
+
+// tRPC API
+app.use(
+  "/trpc",
+  createExpressMiddleware({
+    router: appRouter,
+  })
+);
 
 app.listen(PORT, () => {
   console.log(`FormFlow API running on port ${PORT}`);
