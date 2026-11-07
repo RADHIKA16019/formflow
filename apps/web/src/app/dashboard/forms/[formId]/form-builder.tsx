@@ -688,6 +688,19 @@ export default function FormBuilder() {
           >
             + Add Question
           </button>
+
+<button
+  type="button"
+  onClick={() =>
+    window.location.assign(
+      `/dashboard/forms/${formId}/responses`
+    )
+  }
+  className="rounded-lg border border-[#DED6C1] px-5 py-3 text-sm font-semibold text-[#302E29] transition hover:bg-cream"
+>
+  View Responses →
+</button>
+
         </div>
       </header>
 
