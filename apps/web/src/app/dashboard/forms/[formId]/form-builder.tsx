@@ -38,10 +38,20 @@ const questionTypes = [
 
 type QuestionType = (typeof questionTypes)[number]["value"];
 
+type LogicOperator = "equals" | "notEquals" | "contains";
+
+type QuestionLogic = {
+  action: "show" | "hide";
+  questionId: string;
+  operator: LogicOperator;
+  value: string | number;
+};
+
 type QuestionConfig = {
   options?: string[];
   min?: number;
   max?: number;
+  logic?: QuestionLogic;
 };
 
 type QuestionCardData = {
@@ -58,6 +68,28 @@ function getConfig(value: unknown): QuestionConfig {
   return value as QuestionConfig;
 }
 
+function getOperators(sourceType: QuestionType): {
+  label: string;
+  value: LogicOperator;
+}[] {
+  if (sourceType === "checkbox") {
+    return [{ label: "Contains", value: "contains" }];
+  }
+
+  if (sourceType === "text" || sourceType === "email") {
+    return [
+      { label: "Equals", value: "equals" },
+      { label: "Does not equal", value: "notEquals" },
+      { label: "Contains", value: "contains" },
+    ];
+  }
+
+  return [
+    { label: "Equals", value: "equals" },
+    { label: "Does not equal", value: "notEquals" },
+  ];
+}
+
 // Sortable question card
 function SortableQuestionCard({
   question,
@@ -65,12 +97,14 @@ function SortableQuestionCard({
   onEdit,
   onDelete,
   isDeleting,
+  logicDescription,
 }: {
   question: QuestionCardData;
   index: number;
   onEdit: () => void;
   onDelete: () => void;
   isDeleting: boolean;
+  logicDescription?: string;
 }) {
   const {
     attributes,
@@ -100,7 +134,6 @@ function SortableQuestionCard({
           : "border-border hover:border-[#B7B09E] hover:shadow-sm"
       }`}
     >
-      {/* Drag handle */}
       <button
         type="button"
         {...attributes}
@@ -153,6 +186,19 @@ function SortableQuestionCard({
           Range: {config.min ?? "No minimum"} –{" "}
           {config.max ?? "No maximum"}
         </p>
+      )}
+
+      {config.logic && (
+        <div className="mt-4 rounded-lg border border-[#DED6C1] bg-[#FAF9F6] p-3">
+          <p className="text-xs font-semibold text-[#766747]">
+            <span className="mr-1">↳</span>
+            CONDITIONAL LOGIC
+          </p>
+          <p className="mt-1 text-sm text-foreground">
+            {logicDescription ??
+              `${config.logic.action === "show" ? "Show" : "Hide"} when condition matches`}
+          </p>
+        </div>
       )}
 
       <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
@@ -318,7 +364,6 @@ export default function FormBuilder() {
   const params = useParams<{ formId: string }>();
   const formId = params.formId;
 
-  // Modal and question state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isLinkCopied, setIsLinkCopied] = useState(false);
@@ -336,7 +381,14 @@ export default function FormBuilder() {
   const [min, setMin] = useState("1");
   const [max, setMax] = useState("5");
 
-  // Drag sensors
+  // Conditional logic state
+  const [logicEnabled, setLogicEnabled] = useState(false);
+  const [logicAction, setLogicAction] = useState<"show" | "hide">("show");
+  const [logicQuestionId, setLogicQuestionId] = useState("");
+  const [logicOperator, setLogicOperator] =
+    useState<LogicOperator>("equals");
+  const [logicValue, setLogicValue] = useState("");
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
@@ -346,7 +398,6 @@ export default function FormBuilder() {
     })
   );
 
-  // Queries
   const {
     data: form,
     isLoading: isFormLoading,
@@ -365,7 +416,6 @@ export default function FormBuilder() {
     await utils.getQuestionsByForm.invalidate({ formId });
   };
 
-  // Reset modal
   const resetFields = () => {
     setTitle("");
     setDescription("");
@@ -374,11 +424,17 @@ export default function FormBuilder() {
     setOptions(["Option 1", "Option 2"]);
     setMin("1");
     setMax("5");
+
+    setLogicEnabled(false);
+    setLogicAction("show");
+    setLogicQuestionId("");
+    setLogicOperator("equals");
+    setLogicValue("");
+
     setEditingQuestionId(null);
     setIsModalOpen(false);
   };
 
-  // Mutations
   const createQuestionMutation = trpc.createQuestion.useMutation({
     onSuccess: async () => {
       await refreshQuestions();
@@ -418,7 +474,55 @@ export default function FormBuilder() {
     onSuccess: refreshForm,
   });
 
-  // Create modal
+  // Only earlier questions can be used as logic sources.
+  const currentQuestionIndex = editingQuestionId
+    ? questions?.findIndex((question) => question.id === editingQuestionId) ?? -1
+    : questions?.length ?? 0;
+
+  const availableLogicQuestions = (questions ?? []).filter(
+    (_, index) => index < currentQuestionIndex
+  );
+
+  const selectedLogicQuestion = availableLogicQuestions.find(
+    (question) => question.id === logicQuestionId
+  );
+
+  const selectedLogicQuestionType =
+    selectedLogicQuestion?.type as QuestionType | undefined;
+
+  const logicOperators = selectedLogicQuestionType
+    ? getOperators(selectedLogicQuestionType)
+    : [];
+
+  const handleLogicQuestionChange = (questionId: string) => {
+    setLogicQuestionId(questionId);
+
+    const source = availableLogicQuestions.find(
+      (question) => question.id === questionId
+    );
+
+    if (!source) {
+      setLogicValue("");
+      return;
+    }
+
+    const sourceType = source.type as QuestionType;
+    const sourceConfig = getConfig(source.config);
+
+    setLogicOperator(
+      sourceType === "checkbox" ? "contains" : "equals"
+    );
+
+    if (
+      (sourceType === "select" || sourceType === "checkbox") &&
+      sourceConfig.options?.length
+    ) {
+      setLogicValue(sourceConfig.options[0]);
+    } else {
+      setLogicValue("");
+    }
+  };
+
   const openCreateModal = () => {
     resetFields();
     createQuestionMutation.reset();
@@ -426,7 +530,6 @@ export default function FormBuilder() {
     setIsModalOpen(true);
   };
 
-  // Edit modal
   const openEditModal = (
     question: NonNullable<typeof questions>[number]
   ) => {
@@ -442,6 +545,12 @@ export default function FormBuilder() {
     setMin(String(config.min ?? 1));
     setMax(String(config.max ?? 5));
 
+    setLogicEnabled(Boolean(config.logic));
+    setLogicAction(config.logic?.action ?? "show");
+    setLogicQuestionId(config.logic?.questionId ?? "");
+    setLogicOperator(config.logic?.operator ?? "equals");
+    setLogicValue(String(config.logic?.value ?? ""));
+
     createQuestionMutation.reset();
     updateQuestionMutation.reset();
 
@@ -455,7 +564,6 @@ export default function FormBuilder() {
     setMax("5");
   };
 
-  // Build config
   const buildConfig = (): QuestionConfig => {
     const config: QuestionConfig = {};
 
@@ -470,10 +578,23 @@ export default function FormBuilder() {
       config.max = Number(max);
     }
 
+    if (logicEnabled && selectedLogicQuestion) {
+      const sourceType = selectedLogicQuestion.type as QuestionType;
+
+      config.logic = {
+        action: logicAction,
+        questionId: logicQuestionId,
+        operator: logicOperator,
+        value:
+          sourceType === "number" || sourceType === "rating"
+            ? Number(logicValue)
+            : logicValue,
+      };
+    }
+
     return config;
   };
 
-  // Submit question
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -500,7 +621,6 @@ export default function FormBuilder() {
     }
   };
 
-  // Delete question
   const handleDelete = (questionId: string) => {
     const confirmed = window.confirm(
       "Are you sure you want to delete this question?"
@@ -511,7 +631,6 @@ export default function FormBuilder() {
     }
   };
 
-  // Drag and drop
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
@@ -574,7 +693,15 @@ export default function FormBuilder() {
       !Number.isFinite(Number(max)) ||
       Number(min) > Number(max));
 
-  // Loading states
+  const hasInvalidLogic =
+    logicEnabled &&
+    (!logicQuestionId ||
+      !selectedLogicQuestion ||
+      !logicValue.trim() ||
+      ((selectedLogicQuestionType === "number" ||
+        selectedLogicQuestionType === "rating") &&
+        !Number.isFinite(Number(logicValue))));
+
   if (isFormLoading || areQuestionsLoading) {
     return (
       <div className="p-8 text-sm text-muted">
@@ -618,59 +745,64 @@ export default function FormBuilder() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          {/* Publishing controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full px-3 py-2 text-xs font-semibold ${
+                form.status === "published"
+                  ? "bg-green-50 text-green-700"
+                  : "bg-cream text-foreground"
+              }`}
+            >
+              {form.status === "published" ? "Published" : "Draft"}
+            </span>
 
-{/* Publishing controls */}
-<div className="flex flex-wrap items-center gap-2">
-  <span
-    className={`rounded-full px-3 py-2 text-xs font-semibold ${
-      form.status === "published"
-        ? "bg-green-50 text-green-700"
-        : "bg-cream text-foreground"
-    }`}
-  >
-    {form.status === "published" ? "Published" : "Draft"}
-  </span>
+            <select
+              value={form.visibility}
+              disabled={visibilityMutation.isPending}
+              onChange={(e) => {
+                visibilityMutation.mutate({
+                  formId,
+                  visibility: e.target.value as "public" | "unlisted",
+                });
+              }}
+              className="rounded-lg border border-border bg-white px-3 py-3 text-sm"
+            >
+              <option value="unlisted">Unlisted</option>
+              <option value="public">Public</option>
+            </select>
 
-  <select
-    value={form.visibility}
-    disabled={visibilityMutation.isPending}
-    onChange={(e) => {
-      visibilityMutation.mutate({
-        formId,
-        visibility: e.target.value as "public" | "unlisted",
-      });
-    }}
-    className="rounded-lg border border-border bg-white px-3 py-3 text-sm"
-  >
-    <option value="unlisted">Unlisted</option>
-    <option value="public">Public</option>
-  </select>
-
-  {form.status === "published" ? (
-    <button
-      type="button"
-      onClick={() => unpublishMutation.mutate({ formId })}
-      disabled={unpublishMutation.isPending}
-      className="rounded-lg border border-border px-4 py-3 text-sm font-semibold hover:bg-cream disabled:opacity-50"
-    >
-      {unpublishMutation.isPending ? "Unpublishing..." : "Unpublish"}
-    </button>
-  ) : (
-    <button
-      type="button"
-      onClick={() =>
-        publishMutation.mutate({
-          formId,
-          visibility: form.visibility,
-        })
-      }
-      disabled={publishMutation.isPending || questions.length === 0}
-      className="rounded-lg bg-[#302E29] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:opacity-50"
-    >
-      {publishMutation.isPending ? "Publishing..." : "Publish Form"}
-    </button>
-  )}
-</div>
+            {form.status === "published" ? (
+              <button
+                type="button"
+                onClick={() => unpublishMutation.mutate({ formId })}
+                disabled={unpublishMutation.isPending}
+                className="rounded-lg border border-border px-4 py-3 text-sm font-semibold hover:bg-cream disabled:opacity-50"
+              >
+                {unpublishMutation.isPending
+                  ? "Unpublishing..."
+                  : "Unpublish"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  publishMutation.mutate({
+                    formId,
+                    visibility: form.visibility,
+                  })
+                }
+                disabled={
+                  publishMutation.isPending || questions.length === 0
+                }
+                className="rounded-lg bg-[#302E29] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:opacity-50"
+              >
+                {publishMutation.isPending
+                  ? "Publishing..."
+                  : "Publish Form"}
+              </button>
+            )}
+          </div>
 
           <button
             type="button"
@@ -689,67 +821,66 @@ export default function FormBuilder() {
             + Add Question
           </button>
 
-<button
-  type="button"
-  onClick={() =>
-    window.location.assign(
-      `/dashboard/forms/${formId}/responses`
-    )
-  }
-  className="rounded-lg border border-[#DED6C1] px-5 py-3 text-sm font-semibold text-[#302E29] transition hover:bg-cream"
->
-  View Responses →
-</button>
-
+          <button
+            type="button"
+            onClick={() =>
+              window.location.assign(
+                `/dashboard/forms/${formId}/responses`
+              )
+            }
+            className="rounded-lg border border-[#DED6C1] px-5 py-3 text-sm font-semibold text-[#302E29] transition hover:bg-cream"
+          >
+            View Responses →
+          </button>
         </div>
       </header>
 
       {form.status === "published" && form.slug && (
-  <div className="border-b border-border bg-[#FAF9F6] px-6 py-4 sm:px-10">
-    <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="text-sm font-semibold">Your form is live!</p>
-        <p className="mt-1 text-xs text-muted">
-          Share this link with respondents.
+        <div className="border-b border-border bg-[#FAF9F6] px-6 py-4 sm:px-10">
+          <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">
+                Your form is live!
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Share this link with respondents.
+              </p>
+              <p className="mt-2 break-all text-sm text-muted">
+                /forms/{form.slug}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCopyShareLink}
+              className="shrink-0 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:bg-cream"
+            >
+              {isLinkCopied ? "Copied!" : "Copy Link"}
+            </button>
+          </div>
+
+          {copyError && (
+            <p className="mx-auto mt-2 max-w-3xl text-xs text-red-600">
+              {copyError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(publishMutation.isError ||
+        unpublishMutation.isError ||
+        visibilityMutation.isError) && (
+        <p className="px-6 pt-3 text-sm text-red-600 sm:px-10">
+          {publishMutation.error?.message ||
+            unpublishMutation.error?.message ||
+            visibilityMutation.error?.message}
         </p>
-        <p className="mt-2 break-all text-sm text-muted">
-          /forms/{form.slug}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={handleCopyShareLink}
-        className="shrink-0 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:bg-cream"
-      >
-        {isLinkCopied ? "Copied!" : "Copy Link"}
-      </button>
-    </div>
-
-    {copyError && (
-      <p className="mx-auto mt-2 max-w-3xl text-xs text-red-600">
-        {copyError}
-      </p>
-    )}
-  </div>
-)}
-
-{(publishMutation.isError ||
-  unpublishMutation.isError ||
-  visibilityMutation.isError) && (
-  <p className="px-6 pt-3 text-sm text-red-600 sm:px-10">
-    {publishMutation.error?.message ||
-      unpublishMutation.error?.message ||
-      visibilityMutation.error?.message}
-  </p>
-)}
+      )}
 
       {/* Questions */}
       <main className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
         <div className="mb-8">
-          <h2 className="text-lg font-semibold">
-            Questions
-          </h2>
+          <h2 className="text-lg font-semibold">Questions</h2>
 
           <p className="mt-1 text-sm text-muted">
             Create, customize and organize your form questions.
@@ -800,16 +931,28 @@ export default function FormBuilder() {
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-4">
-                {questions.map((question, index) => (
-                  <SortableQuestionCard
-                    key={question.id}
-                    question={question}
-                    index={index}
-                    onEdit={() => openEditModal(question)}
-                    onDelete={() => handleDelete(question.id)}
-                    isDeleting={deleteQuestionMutation.isPending}
-                  />
-                ))}
+                {questions.map((question, index) => {
+                  const config = getConfig(question.config);
+                  const sourceQuestion = questions.find(
+                    (item) => item.id === config.logic?.questionId
+                  );
+
+                  const logicDescription = config.logic
+                    ? `${config.logic.action === "show" ? "Show" : "Hide"} when "${sourceQuestion?.title ?? "Previous question"}" ${config.logic.operator === "equals" ? "equals" : config.logic.operator === "notEquals" ? "does not equal" : "contains"} "${config.logic.value}"`
+                    : undefined;
+
+                  return (
+                    <SortableQuestionCard
+                      key={question.id}
+                      question={question}
+                      index={index}
+                      onEdit={() => openEditModal(question)}
+                      onDelete={() => handleDelete(question.id)}
+                      isDeleting={deleteQuestionMutation.isPending}
+                      logicDescription={logicDescription}
+                    />
+                  );
+                })}
               </div>
             </SortableContext>
           </DndContext>
@@ -1012,6 +1155,169 @@ export default function FormBuilder() {
                 </div>
               )}
 
+              {/* Conditional Logic */}
+              <div className="rounded-xl border border-[#DED6C1] bg-[#FAF9F6] p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    id="enable-logic"
+                    type="checkbox"
+                    checked={logicEnabled}
+                    onChange={(e) => {
+                      setLogicEnabled(e.target.checked);
+                    }}
+                    disabled={availableLogicQuestions.length === 0}
+                    className="mt-1 size-4 accent-[#8A7652]"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <label
+                      htmlFor="enable-logic"
+                      className="cursor-pointer text-sm font-semibold"
+                    >
+                      Enable Conditional Logic
+                    </label>
+
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
+                      Control when this question appears based on an
+                      earlier answer.
+                    </p>
+                  </div>
+                </div>
+
+                {availableLogicQuestions.length === 0 && (
+                  <p className="mt-3 text-xs text-muted">
+                    Add another question before configuring conditional
+                    logic. Conditions can only refer to earlier questions.
+                  </p>
+                )}
+
+                {logicEnabled && availableLogicQuestions.length > 0 && (
+                  <div className="mt-5 space-y-4 border-t border-[#DED6C1] pt-4">
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold text-muted">
+                        ACTION
+                      </label>
+
+                      <select
+                        value={logicAction}
+                        onChange={(e) =>
+                          setLogicAction(e.target.value as "show" | "hide")
+                        }
+                        className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="show">Show this question</option>
+                        <option value="hide">Hide this question</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold text-muted">
+                        WHEN THIS QUESTION
+                      </label>
+
+                      <select
+                        value={logicQuestionId}
+                        onChange={(e) =>
+                          handleLogicQuestionChange(e.target.value)
+                        }
+                        required={logicEnabled}
+                        className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="">Choose a previous question</option>
+
+                        {availableLogicQuestions.map((question) => (
+                          <option key={question.id} value={question.id}>
+                            {question.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedLogicQuestion && (
+                      <>
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold text-muted">
+                            CONDITION
+                          </label>
+
+                          <select
+                            value={logicOperator}
+                            onChange={(e) =>
+                              setLogicOperator(
+                                e.target.value as LogicOperator
+                              )
+                            }
+                            className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
+                          >
+                            {logicOperators.map((operator) => (
+                              <option
+                                key={operator.value}
+                                value={operator.value}
+                              >
+                                {operator.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold text-muted">
+                            ANSWER VALUE
+                          </label>
+
+                          {(selectedLogicQuestionType === "select" ||
+                            selectedLogicQuestionType === "checkbox") &&
+                          getConfig(selectedLogicQuestion.config).options
+                            ?.length ? (
+                            <select
+                              value={logicValue}
+                              onChange={(e) => setLogicValue(e.target.value)}
+                              required={logicEnabled}
+                              className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
+                            >
+                              <option value="">Choose an answer</option>
+
+                              {getConfig(selectedLogicQuestion.config).options?.map(
+                                (option, index) => (
+                                  <option key={index} value={option}>
+                                    {option}
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          ) : (
+                            <input
+                              type={
+                                selectedLogicQuestionType === "number" ||
+                                selectedLogicQuestionType === "rating"
+                                  ? "number"
+                                  : selectedLogicQuestionType === "date"
+                                    ? "date"
+                                    : "text"
+                              }
+                              value={logicValue}
+                              onChange={(e) => setLogicValue(e.target.value)}
+                              placeholder="Enter the answer to match"
+                              required={logicEnabled}
+                              className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
+                            />
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    <p className="rounded-lg bg-white p-3 text-xs leading-relaxed text-muted">
+                      This question will{" "}
+                      <strong>
+                        {logicAction === "show" ? "appear" : "be hidden"}
+                      </strong>{" "}
+                      when the selected previous question matches your
+                      condition.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <label className="flex items-center gap-3 text-sm">
                 <input
                   type="checkbox"
@@ -1043,7 +1349,8 @@ export default function FormBuilder() {
                     isSaving ||
                     !title.trim() ||
                     hasInvalidOptions ||
-                    hasInvalidRange
+                    hasInvalidRange ||
+                    hasInvalidLogic
                   }
                   className="rounded-lg bg-[#CFC6B1] px-5 py-2.5 text-sm font-semibold text-[#302E29] transition hover:bg-[#B7B09E] disabled:cursor-not-allowed disabled:opacity-50"
                 >

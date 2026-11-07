@@ -56,13 +56,32 @@ const formIdSchema = z.object({
   formId: z.string().uuid(),
 });
 
+
+const questionLogicSchema = z.object({
+  action: z.enum(["show", "hide"]).default("show"),
+  questionId: z.string().uuid(),
+  operator: z.enum([
+    "equals",
+    "notEquals",
+    "contains",
+  ]),
+  value: z.union([
+    z.string().max(500),
+    z.number().finite(),
+  ]),
+});
+
 const questionConfigSchema = z.object({
   options: z.array(
     z.string().trim().min(1).max(100)
   ).max(50).optional(),
+
   min: z.number().finite().optional(),
   max: z.number().finite().optional(),
+
+  logic: questionLogicSchema.optional(),
 });
+
 
 const questionIdSchema = z.object({
   questionId: z.string().uuid(),
