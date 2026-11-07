@@ -7,6 +7,7 @@ import {
   asc,
   sql,
 } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { db } from "../db/index.js";
@@ -47,6 +48,8 @@ const questionTypeSchema = z.enum([
   "rating",
   "date",
 ]);
+
+const visibilitySchema = z.enum(["public", "unlisted"]);
 
 const formIdSchema = z.object({
   formId: z.string().uuid(),
@@ -120,9 +123,42 @@ function validateQuestionConfig(
   ) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Minimum and maximum are only supported for number and rating questions.",
+      message:
+        "Minimum and maximum are only supported for number and rating questions.",
     });
   }
+}
+
+// --------------------------------------------------
+// SLUG GENERATION
+// --------------------------------------------------
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50);
+}
+
+async function generateUniqueSlug(title: string) {
+  const baseSlug = slugify(title) || "form";
+
+  // Random suffix makes collisions extremely unlikely.
+  const slug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
+
+  const [existingForm] = await db
+    .select({ id: forms.id })
+    .from(forms)
+    .where(eq(forms.slug, slug))
+    .limit(1);
+
+  if (existingForm) {
+    return generateUniqueSlug(title);
+  }
+
+  return slug;
 }
 
 // --------------------------------------------------
@@ -153,7 +189,7 @@ export const appRouter = t.router({
   })),
 
   // ----------------------------------------------
-  // FORMS
+  // FORMS - CREATE
   // ----------------------------------------------
 
   createForm: protectedProcedure
@@ -178,6 +214,10 @@ export const appRouter = t.router({
         form: newForm,
       };
     }),
+
+  // ----------------------------------------------
+  // FORMS - READ
+  // ----------------------------------------------
 
   getMyForms: protectedProcedure.query(async ({ ctx }) => {
     return db
@@ -210,6 +250,10 @@ export const appRouter = t.router({
 
       return form;
     }),
+
+  // ----------------------------------------------
+  // FORMS - UPDATE
+  // ----------------------------------------------
 
   updateForm: protectedProcedure
     .input(
@@ -248,6 +292,10 @@ export const appRouter = t.router({
       };
     }),
 
+  // ----------------------------------------------
+  // FORMS - DELETE
+  // ----------------------------------------------
+
   deleteForm: protectedProcedure
     .input(formIdSchema)
     .mutation(async ({ ctx, input }) => {
@@ -270,6 +318,229 @@ export const appRouter = t.router({
 
       return {
         message: "Form deleted successfully!",
+      };
+    }),
+
+  // ----------------------------------------------
+  // PUBLISHING - PUBLISH FORM
+  // ----------------------------------------------
+
+  publishForm: protectedProcedure
+    .input(
+      z.object({
+        formId: z.string().uuid(),
+        visibility: visibilitySchema.default("unlisted"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [form] = await db
+        .select()
+        .from(forms)
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .limit(1);
+
+      if (!form) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Form not found.",
+        });
+      }
+
+      const existingQuestions = await db
+        .select({ id: questions.id })
+        .from(questions)
+        .where(eq(questions.formId, input.formId));
+
+      if (existingQuestions.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Add at least one question before publishing your form.",
+        });
+      }
+
+      const slug = form.slug ?? await generateUniqueSlug(form.title);
+
+      const [publishedForm] = await db
+        .update(forms)
+        .set({
+          slug,
+          status: "published",
+          visibility: input.visibility,
+          publishedAt: form.publishedAt ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .returning();
+
+      return {
+        message: "Form published successfully!",
+        form: publishedForm,
+        shareUrl: `/forms/${publishedForm.slug}`,
+      };
+    }),
+
+  // ----------------------------------------------
+  // PUBLISHING - UNPUBLISH FORM
+  // ----------------------------------------------
+
+  unpublishForm: protectedProcedure
+    .input(formIdSchema)
+    .mutation(async ({ ctx, input }) => {
+      const [unpublishedForm] = await db
+        .update(forms)
+        .set({
+          status: "draft",
+          publishedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .returning();
+
+      if (!unpublishedForm) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Form not found.",
+        });
+      }
+
+      return {
+        message: "Form unpublished successfully!",
+        form: unpublishedForm,
+      };
+    }),
+
+  // ----------------------------------------------
+  // PUBLISHING - UPDATE VISIBILITY
+  // ----------------------------------------------
+
+  updateFormVisibility: protectedProcedure
+    .input(
+      z.object({
+        formId: z.string().uuid(),
+        visibility: visibilitySchema,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [updatedForm] = await db
+        .update(forms)
+        .set({
+          visibility: input.visibility,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .returning();
+
+      if (!updatedForm) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Form not found.",
+        });
+      }
+
+      return {
+        message: "Form visibility updated successfully!",
+        form: updatedForm,
+      };
+    }),
+
+  // ----------------------------------------------
+  // PUBLIC FORMS - DISCOVERY
+  // ----------------------------------------------
+
+  getPublicForms: publicProcedure.query(async () => {
+    return db
+      .select({
+        id: forms.id,
+        title: forms.title,
+        description: forms.description,
+        slug: forms.slug,
+        publishedAt: forms.publishedAt,
+      })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.status, "published"),
+          eq(forms.visibility, "public")
+        )
+      )
+      .orderBy(desc(forms.publishedAt))
+      .limit(50);
+  }),
+
+  // ----------------------------------------------
+  // PUBLIC FORMS - ACCESS BY SLUG
+  // ----------------------------------------------
+
+  getPublicFormBySlug: publicProcedure
+    .input(
+      z.object({
+        slug: z.string().min(1).max(100),
+      })
+    )
+    .query(async ({ input }) => {
+      const [form] = await db
+        .select({
+          id: forms.id,
+          title: forms.title,
+          description: forms.description,
+          slug: forms.slug,
+          status: forms.status,
+          visibility: forms.visibility,
+          publishedAt: forms.publishedAt,
+        })
+        .from(forms)
+        .where(
+          and(
+            eq(forms.slug, input.slug),
+            eq(forms.status, "published")
+          )
+        )
+        .limit(1);
+
+      if (!form) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "This form is unavailable or has not been published.",
+        });
+      }
+
+      const formQuestions = await db
+        .select({
+          id: questions.id,
+          title: questions.title,
+          description: questions.description,
+          type: questions.type,
+          required: questions.required,
+          position: questions.position,
+          config: questions.config,
+        })
+        .from(questions)
+        .where(eq(questions.formId, form.id))
+        .orderBy(asc(questions.position));
+
+      return {
+        form,
+        questions: formQuestions,
       };
     }),
 
@@ -382,7 +653,10 @@ export const appRouter = t.router({
       const [existingQuestion] = await db
         .select({ id: questions.id })
         .from(questions)
-        .innerJoin(forms, eq(questions.formId, forms.id))
+        .innerJoin(
+          forms,
+          eq(questions.formId, forms.id)
+        )
         .where(
           and(
             eq(questions.id, input.questionId),
@@ -481,7 +755,9 @@ export const appRouter = t.router({
         });
       }
 
-      if (new Set(input.questionIds).size !== input.questionIds.length) {
+      if (
+        new Set(input.questionIds).size !== input.questionIds.length
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Duplicate question IDs are not allowed.",

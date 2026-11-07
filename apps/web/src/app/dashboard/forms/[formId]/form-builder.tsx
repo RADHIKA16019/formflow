@@ -321,6 +321,8 @@ export default function FormBuilder() {
   // Modal and question state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(
     null
   );
@@ -397,6 +399,23 @@ export default function FormBuilder() {
 
   const reorderQuestionsMutation = trpc.reorderQuestions.useMutation({
     onSuccess: refreshQuestions,
+  });
+
+  const refreshForm = async () => {
+    await utils.getFormById.invalidate({ formId });
+    await utils.getMyForms.invalidate();
+  };
+
+  const publishMutation = trpc.publishForm.useMutation({
+    onSuccess: refreshForm,
+  });
+
+  const unpublishMutation = trpc.unpublishForm.useMutation({
+    onSuccess: refreshForm,
+  });
+
+  const visibilityMutation = trpc.updateFormVisibility.useMutation({
+    onSuccess: refreshForm,
   });
 
   // Create modal
@@ -520,6 +539,21 @@ export default function FormBuilder() {
     });
   };
 
+  const handleCopyShareLink = async () => {
+    if (!form?.slug) return;
+
+    const shareUrl = `${window.location.origin}/forms/${form.slug}`;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setIsLinkCopied(true);
+      setCopyError("");
+    } catch {
+      setIsLinkCopied(false);
+      setCopyError("Unable to copy link. Please copy it manually.");
+    }
+  };
+
   const isSaving =
     createQuestionMutation.isPending ||
     updateQuestionMutation.isPending;
@@ -584,6 +618,60 @@ export default function FormBuilder() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+
+{/* Publishing controls */}
+<div className="flex flex-wrap items-center gap-2">
+  <span
+    className={`rounded-full px-3 py-2 text-xs font-semibold ${
+      form.status === "published"
+        ? "bg-green-50 text-green-700"
+        : "bg-cream text-foreground"
+    }`}
+  >
+    {form.status === "published" ? "Published" : "Draft"}
+  </span>
+
+  <select
+    value={form.visibility}
+    disabled={visibilityMutation.isPending}
+    onChange={(e) => {
+      visibilityMutation.mutate({
+        formId,
+        visibility: e.target.value as "public" | "unlisted",
+      });
+    }}
+    className="rounded-lg border border-border bg-white px-3 py-3 text-sm"
+  >
+    <option value="unlisted">Unlisted</option>
+    <option value="public">Public</option>
+  </select>
+
+  {form.status === "published" ? (
+    <button
+      type="button"
+      onClick={() => unpublishMutation.mutate({ formId })}
+      disabled={unpublishMutation.isPending}
+      className="rounded-lg border border-border px-4 py-3 text-sm font-semibold hover:bg-cream disabled:opacity-50"
+    >
+      {unpublishMutation.isPending ? "Unpublishing..." : "Unpublish"}
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() =>
+        publishMutation.mutate({
+          formId,
+          visibility: form.visibility,
+        })
+      }
+      disabled={publishMutation.isPending || questions.length === 0}
+      className="rounded-lg bg-[#302E29] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:opacity-50"
+    >
+      {publishMutation.isPending ? "Publishing..." : "Publish Form"}
+    </button>
+  )}
+</div>
+
           <button
             type="button"
             onClick={() => setIsPreviewOpen(true)}
@@ -602,6 +690,46 @@ export default function FormBuilder() {
           </button>
         </div>
       </header>
+
+      {form.status === "published" && form.slug && (
+  <div className="border-b border-border bg-[#FAF9F6] px-6 py-4 sm:px-10">
+    <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold">Your form is live!</p>
+        <p className="mt-1 text-xs text-muted">
+          Share this link with respondents.
+        </p>
+        <p className="mt-2 break-all text-sm text-muted">
+          /forms/{form.slug}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleCopyShareLink}
+        className="shrink-0 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:bg-cream"
+      >
+        {isLinkCopied ? "Copied!" : "Copy Link"}
+      </button>
+    </div>
+
+    {copyError && (
+      <p className="mx-auto mt-2 max-w-3xl text-xs text-red-600">
+        {copyError}
+      </p>
+    )}
+  </div>
+)}
+
+{(publishMutation.isError ||
+  unpublishMutation.isError ||
+  visibilityMutation.isError) && (
+  <p className="px-6 pt-3 text-sm text-red-600 sm:px-10">
+    {publishMutation.error?.message ||
+      unpublishMutation.error?.message ||
+      visibilityMutation.error?.message}
+  </p>
+)}
 
       {/* Questions */}
       <main className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
