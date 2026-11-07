@@ -241,6 +241,30 @@ export const appRouter = t.router({
     return result.total;
   }),
 
+getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
+  const analytics = await db
+    .select({
+      date: sql<string>`
+        TO_CHAR(
+          DATE(${responses.submittedAt} + INTERVAL '5 hours 30 minutes'),
+          'YYYY-MM-DD'
+        )
+      `,
+      total: count(responses.id),
+    })
+    .from(responses)
+    .innerJoin(forms, eq(responses.formId, forms.id))
+    .where(eq(forms.ownerId, ctx.session.user.id))
+    .groupBy(
+      sql`DATE(${responses.submittedAt} + INTERVAL '5 hours 30 minutes')`
+    )
+    .orderBy(
+      sql`DATE(${responses.submittedAt} + INTERVAL '5 hours 30 minutes')`
+    );
+
+  return analytics;
+}),
+
   getFormResponses: protectedProcedure
   .input(
     z.object({

@@ -6,6 +6,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { trpc } from "@/utils/trpc";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 const navigation = [
   { label: "Overview", icon: "◫", active: true },
@@ -44,24 +53,30 @@ export default function DashboardPage() {
     enabled: !!session,
   });
 
-  // Fetch total responses across all user's forms
-const {
-  data: totalResponses,
-  isLoading: areResponsesLoading,
-} = trpc.getTotalResponses.useQuery(undefined, {
-  enabled: !!session,
-});
+  // Fetch total responses
+  const {
+    data: totalResponses,
+    isLoading: areResponsesLoading,
+  } = trpc.getTotalResponses.useQuery(undefined, {
+    enabled: !!session,
+  });
 
-  // tRPC utilities for refreshing queries
+  // Fetch response analytics
+  const {
+    data: analyticsData,
+    isLoading: isAnalyticsLoading,
+  } = trpc.getResponseAnalytics.useQuery(undefined, {
+    enabled: !!session,
+  });
+
+  // tRPC utilities
   const utils = trpc.useUtils();
 
   // Create form mutation
   const createFormMutation = trpc.createForm.useMutation({
     onSuccess: async () => {
-      // Refresh forms list after successful creation
       await utils.getMyForms.invalidate();
 
-      // Close modal and reset inputs
       setIsCreateModalOpen(false);
       setTitle("");
       setDescription("");
@@ -113,12 +128,12 @@ const {
       description: "Forms created",
     },
     {
-  label: "Total Responses",
-  value: areResponsesLoading
-    ? "..."
-    : String(totalResponses ?? 0),
-  description: "Responses received",
-},
+      label: "Total Responses",
+      value: areResponsesLoading
+        ? "..."
+        : String(totalResponses ?? 0),
+      description: "Responses received",
+    },
     {
       label: "Published Forms",
       value: areFormsLoading ? "..." : String(publishedForms),
@@ -196,7 +211,7 @@ const {
             </h1>
 
             <p className="mt-1 text-sm text-muted">
-              Here&apos;s what&apos;s happening with your forms.
+              Here's what's happening with your forms.
             </p>
           </div>
 
@@ -240,103 +255,162 @@ const {
             </div>
           </section>
 
+          {/* Responses Analytics */}
+          <section className="rounded-2xl border border-[#DED6C1] bg-white p-6">
+
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-[#302E29]">
+                Responses Over Time
+              </h2>
+
+              <p className="mt-1 text-sm text-[#777267]">
+                Track how many responses your forms receive each day.
+              </p>
+            </div>
+
+            {isAnalyticsLoading ? (
+              <div className="flex h-[280px] items-center justify-center text-sm text-[#777267]">
+                Loading analytics...
+              </div>
+            ) : !analyticsData?.length ? (
+              <div className="flex h-[280px] items-center justify-center text-sm text-[#777267]">
+                No response data available yet.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={analyticsData}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#EAE5D9"
+                  />
+
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(value) =>
+                      new Date(`${value}T00:00:00`).toLocaleDateString(
+                        "en-IN",
+                        {
+                          day: "numeric",
+                          month: "short",
+                        }
+                      )
+                    }
+                  />
+
+                  <YAxis allowDecimals={false} />
+
+                  <Tooltip />
+
+                  <Line
+                    type="monotone"
+                    dataKey="total"
+                    name="Responses"
+                    stroke="#8C8068"
+                    strokeWidth={3}
+                    dot={{ r: 4 }}
+                    activeDot={{ r: 7 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </section>
+
           {/* Recent Forms */}
-         
-{/* Recent Forms */}
-<section>
-  <div className="mb-5 flex items-center justify-between">
-    <div>
-      <h2 className="text-base font-semibold">
-        Recent Forms
-      </h2>
+          <section>
 
-      <p className="mt-1 text-sm text-muted">
-        Your recently created forms.
-      </p>
-    </div>
-  </div>
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold">
+                  Recent Forms
+                </h2>
 
-  {areFormsLoading ? (
-    <div className="flex min-h-64 items-center justify-center rounded-xl border border-border text-sm text-muted">
-      Loading your forms...
-    </div>
-  ) : formsError ? (
-    <div className="flex min-h-64 items-center justify-center rounded-xl border border-red-200 text-sm text-red-600">
-      Failed to load forms. Please refresh the page.
-    </div>
-  ) : recentForms.length === 0 ? (
-    <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-[#CFC6B1] px-6 py-12 text-center">
-      <div className="flex size-14 items-center justify-center rounded-xl bg-[#EBE2CC] text-2xl">
-        +
-      </div>
+                <p className="mt-1 text-sm text-muted">
+                  Your recently created forms.
+                </p>
+              </div>
+            </div>
 
-      <h3 className="mt-5 text-base font-semibold">
-        No forms yet
-      </h3>
+            {areFormsLoading ? (
+              <div className="flex min-h-64 items-center justify-center rounded-xl border border-border text-sm text-muted">
+                Loading your forms...
+              </div>
+            ) : formsError ? (
+              <div className="flex min-h-64 items-center justify-center rounded-xl border border-red-200 text-sm text-red-600">
+                Failed to load forms. Please refresh the page.
+              </div>
+            ) : recentForms.length === 0 ? (
+              <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-[#CFC6B1] px-6 py-12 text-center">
 
-      <p className="mt-2 max-w-sm text-sm leading-6 text-muted">
-        Your forms will appear here. Create your first
-        form and start collecting responses.
-      </p>
+                <div className="flex size-14 items-center justify-center rounded-xl bg-[#EBE2CC] text-2xl">
+                  +
+                </div>
 
-      <button
-        onClick={() => setIsCreateModalOpen(true)}
-        className="mt-5 rounded-lg bg-[#CFC6B1] px-5 py-2.5 text-sm font-semibold hover:bg-[#B7B09E]"
-      >
-        Create your first form
-      </button>
-    </div>
-  ) : (
-    <div className="space-y-3">
-      {recentForms.map((form) => (
-        <div
-          key={form.id}
-          className="flex flex-col justify-between gap-4 rounded-xl border border-border bg-white p-5 transition hover:border-[#B7B09E] sm:flex-row sm:items-center"
-        >
-          <Link
-            href={`/dashboard/forms/${form.id}`}
-            className="min-w-0 flex-1"
-          >
-            <h3 className="font-semibold">
-              {form.title}
-            </h3>
+                <h3 className="mt-5 text-base font-semibold">
+                  No forms yet
+                </h3>
 
-            <p className="mt-1 text-sm text-muted">
-              {form.description || "No description"}
-            </p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-muted">
+                  Your forms will appear here. Create your first
+                  form and start collecting responses.
+                </p>
 
-            <p className="mt-2 text-xs text-muted">
-              Created{" "}
-              {new Date(form.createdAt).toLocaleDateString()}
-            </p>
-          </Link>
+                <button
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="mt-5 rounded-lg bg-[#CFC6B1] px-5 py-2.5 text-sm font-semibold hover:bg-[#B7B09E]"
+                >
+                  Create your first form
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentForms.map((form) => (
+                  <div
+                    key={form.id}
+                    className="flex flex-col justify-between gap-4 rounded-xl border border-border bg-white p-5 transition hover:border-[#B7B09E] sm:flex-row sm:items-center"
+                  >
+                    <Link
+                      href={`/dashboard/forms/${form.id}`}
+                      className="min-w-0 flex-1"
+                    >
+                      <h3 className="font-semibold">
+                        {form.title}
+                      </h3>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
-                form.status === "published"
-                  ? "bg-green-50 text-green-700"
-                  : form.status === "archived"
-                    ? "bg-gray-100 text-gray-600"
-                    : "bg-cream text-foreground"
-              }`}
-            >
-              {form.status}
-            </span>
+                      <p className="mt-1 text-sm text-muted">
+                        {form.description || "No description"}
+                      </p>
 
-            <Link
-              href={`/dashboard/forms/${form.id}/responses`}
-              className="rounded-lg border border-[#DED6C1] px-4 py-2 text-sm font-semibold text-[#302E29] transition hover:bg-[#F8F6F0]"
-            >
-              View Responses →
-            </Link>
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-</section>
+                      <p className="mt-2 text-xs text-muted">
+                        Created{" "}
+                        {new Date(form.createdAt).toLocaleDateString()}
+                      </p>
+                    </Link>
 
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
+                          form.status === "published"
+                            ? "bg-green-50 text-green-700"
+                            : form.status === "archived"
+                              ? "bg-gray-100 text-gray-600"
+                              : "bg-cream text-foreground"
+                        }`}
+                      >
+                        {form.status}
+                      </span>
+
+                      <Link
+                        href={`/dashboard/forms/${form.id}/responses`}
+                        className="rounded-lg border border-[#DED6C1] px-4 py-2 text-sm font-semibold text-[#302E29] transition hover:bg-[#F8F6F0]"
+                      >
+                        View Responses →
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
           {/* Authentication Status */}
           <p className="text-xs text-muted">
@@ -344,6 +418,7 @@ const {
               ? "Verifying workspace..."
               : profile?.message ?? "Workspace connected"}
           </p>
+
         </div>
       </main>
 
