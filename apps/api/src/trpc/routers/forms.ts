@@ -26,6 +26,8 @@ const formThemeSchema = z.object({
   buttonStyle: z.enum(["rounded", "pill", "square"]),
   borderRadius: z.enum(["small", "medium", "large"]),
   backgroundStyle: z.enum(["solid", "gradient"]),
+  backgroundImage: z.string().max(1500000).optional(),
+  backgroundImageName: z.string().max(255).optional(),
 });
 
 // -----------------------------------------

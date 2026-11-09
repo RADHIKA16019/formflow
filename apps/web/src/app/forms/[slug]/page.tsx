@@ -32,6 +32,18 @@ type Question = {
   config?: unknown;
 };
 
+type PublicFormTheme = {
+  primaryColor: string;
+  secondaryColor: string;
+  backgroundColor: string;
+  fontFamily: string;
+  buttonStyle: "rounded" | "pill" | "square";
+  borderRadius: "small" | "medium" | "large";
+  backgroundStyle: "solid" | "gradient";
+  backgroundImage?: string;
+  backgroundImageName?: string;
+};
+
 function validateQuestions(
   questionsToValidate: Question[],
   answers: Record<string, AnswerValue>
@@ -336,20 +348,35 @@ function PublicFormContent() {
 
   const form = formQuery.data.form;
 
-  const theme = form.theme ?? {
+  const theme: PublicFormTheme = form.theme ?? {
     primaryColor: "#B7B09E",
     secondaryColor: "#CFC6B1",
     backgroundColor: "#EBE2CC",
     fontFamily: "Inter",
-    buttonStyle: "rounded" as const,
-    borderRadius: "medium" as const,
-    backgroundStyle: "solid" as const,
+    buttonStyle: "rounded",
+    borderRadius: "medium",
+    backgroundStyle: "solid",
   };
 
-  const pageBackground =
-    theme.backgroundStyle === "gradient"
+  const hasBackgroundImage = Boolean(theme.backgroundImage);
+
+  const pageBackground = hasBackgroundImage
+    ? theme.backgroundColor
+    : theme.backgroundStyle === "gradient"
       ? `linear-gradient(135deg, ${theme.backgroundColor}, ${theme.secondaryColor})`
       : theme.backgroundColor;
+
+  const pageBackgroundStyle: React.CSSProperties = {
+    background: pageBackground,
+    backgroundImage: hasBackgroundImage
+      ? `linear-gradient(rgba(0,0,0,0.12), rgba(0,0,0,0.12)), url("${theme.backgroundImage}")`
+      : undefined,
+    backgroundSize: hasBackgroundImage ? "cover" : undefined,
+    backgroundPosition: hasBackgroundImage ? "center" : undefined,
+    backgroundRepeat: hasBackgroundImage ? "no-repeat" : undefined,
+    backgroundAttachment: hasBackgroundImage ? "fixed" : undefined,
+    fontFamily: theme.fontFamily,
+  };
 
   const cardRadius =
     theme.borderRadius === "small"
@@ -385,10 +412,7 @@ function PublicFormContent() {
     return (
       <main
         className="flex min-h-screen items-center justify-center px-5"
-        style={{
-          background: pageBackground,
-          fontFamily: theme.fontFamily,
-        }}
+        style={pageBackgroundStyle}
       >
         <div
           className="w-full max-w-lg bg-white p-10 text-center shadow-sm"
@@ -428,10 +452,7 @@ function PublicFormContent() {
     return (
       <main
         className="flex min-h-screen items-center justify-center px-5"
-        style={{
-          background: pageBackground,
-          fontFamily: theme.fontFamily,
-        }}
+        style={pageBackgroundStyle}
       >
         <div
           className="w-full max-w-lg bg-white p-10 text-center shadow-sm"
@@ -471,10 +492,7 @@ function PublicFormContent() {
   return (
     <main
       className="min-h-screen px-4 py-12 sm:py-20"
-      style={{
-        background: pageBackground,
-        fontFamily: theme.fontFamily,
-      }}
+      style={pageBackgroundStyle}
     >
       <div className="mx-auto max-w-2xl">
         <div

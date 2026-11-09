@@ -54,6 +54,8 @@ export type FormTheme = {
   buttonStyle: "rounded" | "pill" | "square";
   borderRadius: "small" | "medium" | "large";
   backgroundStyle: "solid" | "gradient";
+  backgroundImage?: string;
+  backgroundImageName?: string;
 };
 
 // Forms table
