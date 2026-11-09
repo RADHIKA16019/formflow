@@ -1,0 +1,1 @@
+ALTER TABLE "questions" ADD COLUMN "page_number" integer DEFAULT 1 NOT NULL;

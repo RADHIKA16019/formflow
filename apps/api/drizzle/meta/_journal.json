@@ -15,6 +15,20 @@
       "when": 1794030353819,
       "tag": "0001_fine_nemesis",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794201562958,
+      "tag": "0002_broken_ogun",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794202265439,
+      "tag": "0003_flowery_bug",
+      "breakpoints": true
     }
   ]
 }

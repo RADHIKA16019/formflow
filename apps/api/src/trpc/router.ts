@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { db } from "../db/index.js";
-import { forms, questions, responses } from "../db/schema.js";
+import { forms, questions, responses, formPages } from "../db/schema.js";
 import type { Context } from "./context.js";
 
 // --------------------------------------------------
@@ -93,6 +93,7 @@ const questionInputSchema = z.object({
   description: z.string().trim().max(500).optional(),
   type: questionTypeSchema,
   required: z.boolean().default(false),
+  pageNumber: z.number().int().min(1).optional(),
   config: questionConfigSchema.optional(),
 });
 
@@ -591,58 +592,82 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
   // PUBLIC FORMS - ACCESS BY SLUG
   // ----------------------------------------------
 
-  getPublicFormBySlug: publicProcedure
-    .input(
-      z.object({
-        slug: z.string().min(1).max(100),
+ getPublicFormBySlug: publicProcedure
+  .input(
+    z.object({
+      slug: z.string().min(1).max(100),
+    })
+  )
+  .query(async ({ input }) => {
+    const [form] = await db
+      .select({
+        id: forms.id,
+        title: forms.title,
+        description: forms.description,
+        slug: forms.slug,
+        status: forms.status,
+        visibility: forms.visibility,
+        publishedAt: forms.publishedAt,
       })
-    )
-    .query(async ({ input }) => {
-      const [form] = await db
-        .select({
-          id: forms.id,
-          title: forms.title,
-          description: forms.description,
-          slug: forms.slug,
-          status: forms.status,
-          visibility: forms.visibility,
-          publishedAt: forms.publishedAt,
-        })
-        .from(forms)
-        .where(
-          and(
-            eq(forms.slug, input.slug),
-            eq(forms.status, "published")
-          )
+      .from(forms)
+      .where(
+        and(
+          eq(forms.slug, input.slug),
+          eq(forms.status, "published")
         )
-        .limit(1);
+      )
+      .limit(1);
 
-      if (!form) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "This form is unavailable or has not been published.",
-        });
-      }
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "This form is unavailable or has not been published.",
+      });
+    }
 
-      const formQuestions = await db
-        .select({
-          id: questions.id,
-          title: questions.title,
-          description: questions.description,
-          type: questions.type,
-          required: questions.required,
-          position: questions.position,
-          config: questions.config,
-        })
-        .from(questions)
-        .where(eq(questions.formId, form.id))
-        .orderBy(asc(questions.position));
+    const pages = await db
+      .select({
+        pageNumber: formPages.pageNumber,
+        title: formPages.title,
+        description: formPages.description,
+      })
+      .from(formPages)
+      .where(eq(formPages.formId, form.id))
+      .orderBy(asc(formPages.pageNumber));
 
-      return {
-        form,
-        questions: formQuestions,
-      };
-    }),
+    const formQuestions = await db
+      .select({
+        id: questions.id,
+        title: questions.title,
+        description: questions.description,
+        type: questions.type,
+        required: questions.required,
+        position: questions.position,
+        pageNumber: questions.pageNumber,
+        config: questions.config,
+      })
+      .from(questions)
+      .where(eq(questions.formId, form.id))
+      .orderBy(
+        asc(questions.pageNumber),
+        asc(questions.position)
+      );
+
+    return {
+      form,
+      pages:
+        pages.length > 0
+          ? pages
+          : [
+              {
+                pageNumber: 1,
+                title: "Page 1",
+                description: null,
+              },
+            ],
+      questions: formQuestions,
+    };
+  }),
 
   // ----------------------------------------------
   // QUESTIONS - READ
@@ -845,6 +870,450 @@ submitPublicResponse: publicProcedure
     };
   }),
 
+getPages: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+    })
+  )
+  .query(async ({ ctx, input }) => {
+    const [form] = await db
+      .select({ id: forms.id })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found",
+      });
+    }
+
+    let pages = await db
+      .select()
+      .from(formPages)
+      .where(eq(formPages.formId, input.formId))
+      .orderBy(asc(formPages.pageNumber));
+
+    // Ensure every existing form has at least Page 1.
+    if (pages.length === 0) {
+      await db.insert(formPages).values({
+        formId: input.formId,
+        pageNumber: 1,
+        title: "Page 1",
+      });
+
+      pages = await db
+        .select()
+        .from(formPages)
+        .where(eq(formPages.formId, input.formId))
+        .orderBy(asc(formPages.pageNumber));
+    }
+
+    return pages;
+  }),
+
+createPage: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+      title: z.string().trim().min(1).max(200).optional(),
+      description: z.string().trim().max(500).optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [form] = await db
+      .select({ id: forms.id })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found",
+      });
+    }
+
+    const [result] = await db
+      .select({
+        maxPage: sql<number>`COALESCE(MAX(${formPages.pageNumber}), 0)`,
+      })
+      .from(formPages)
+      .where(eq(formPages.formId, input.formId));
+
+    const nextPageNumber = Number(result.maxPage) + 1;
+
+    const [page] = await db
+      .insert(formPages)
+      .values({
+        formId: input.formId,
+        pageNumber: nextPageNumber,
+        title: input.title ?? `Page ${nextPageNumber}`,
+        description: input.description,
+      })
+      .returning();
+
+    return page;
+  }),
+
+updatePage: protectedProcedure
+  .input(
+    z.object({
+      pageId: z.string().uuid(),
+      title: z.string().trim().min(1).max(200),
+      description: z.string().trim().max(500).nullable().optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [page] = await db
+      .select()
+      .from(formPages)
+      .innerJoin(forms, eq(formPages.formId, forms.id))
+      .where(
+        and(
+          eq(formPages.id, input.pageId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!page) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Page not found",
+      });
+    }
+
+    const [updatedPage] = await db
+      .update(formPages)
+      .set({
+        title: input.title,
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+      })
+      .where(eq(formPages.id, input.pageId))
+      .returning();
+
+    return updatedPage;
+  }),
+
+moveQuestionToPage: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+      questionId: z.string().uuid(),
+      pageNumber: z.number().int().min(1),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [form] = await db
+      .select({ id: forms.id })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found",
+      });
+    }
+
+    const [page] = await db
+      .select()
+      .from(formPages)
+      .where(
+        and(
+          eq(formPages.formId, input.formId),
+          eq(formPages.pageNumber, input.pageNumber)
+        )
+      )
+      .limit(1);
+
+    if (!page) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Target page not found",
+      });
+    }
+
+    const [question] = await db
+      .select()
+      .from(questions)
+      .where(
+        and(
+          eq(questions.id, input.questionId),
+          eq(questions.formId, input.formId)
+        )
+      )
+      .limit(1);
+
+    if (!question) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Question not found",
+      });
+    }
+
+    const [positionResult] = await db
+      .select({
+        maxPosition: sql<number>`COALESCE(MAX(${questions.position}), -1)`,
+      })
+      .from(questions)
+      .where(
+        and(
+          eq(questions.formId, input.formId),
+          eq(questions.pageNumber, input.pageNumber)
+        )
+      );
+
+    const nextPosition = Number(positionResult.maxPosition) + 1;
+
+    const [updatedQuestion] = await db
+      .update(questions)
+      .set({
+        pageNumber: input.pageNumber,
+        position: nextPosition,
+      })
+      .where(eq(questions.id, input.questionId))
+      .returning();
+
+    return updatedQuestion;
+  }),
+
+deletePage: protectedProcedure
+  .input(
+    z.object({
+      pageId: z.string().uuid(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [page] = await db
+      .select()
+      .from(formPages)
+      .innerJoin(forms, eq(formPages.formId, forms.id))
+      .where(
+        and(
+          eq(formPages.id, input.pageId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!page) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Page not found",
+      });
+    }
+
+    const currentPage = page.form_pages;
+    const formId = currentPage.formId;
+
+    const allPages = await db
+      .select()
+      .from(formPages)
+      .where(eq(formPages.formId, formId))
+      .orderBy(asc(formPages.pageNumber));
+
+    if (allPages.length <= 1) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "A form must have at least one page",
+      });
+    }
+
+    const targetPage = allPages.find(
+      (item) => item.id !== input.pageId
+    );
+
+    if (!targetPage) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Target page not found",
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      const [positionResult] = await tx
+        .select({
+          maxPosition: sql<number>`COALESCE(MAX(${questions.position}), -1)`,
+        })
+        .from(questions)
+        .where(
+          and(
+            eq(questions.formId, formId),
+            eq(questions.pageNumber, targetPage.pageNumber)
+          )
+        );
+
+      await tx
+        .update(questions)
+        .set({
+          pageNumber: targetPage.pageNumber,
+          position: sql`${questions.position} + ${Number(positionResult.maxPosition) + 1}`,
+        })
+        .where(
+          and(
+            eq(questions.formId, formId),
+            eq(questions.pageNumber, currentPage.pageNumber)
+          )
+        );
+
+      await tx
+        .delete(formPages)
+        .where(eq(formPages.id, input.pageId));
+
+      const remainingPages = allPages.filter(
+        (item) => item.id !== input.pageId
+      );
+
+      for (let index = 0; index < remainingPages.length; index++) {
+        const oldPage = remainingPages[index];
+        const newPageNumber = index + 1;
+
+        if (oldPage.pageNumber !== newPageNumber) {
+          await tx
+            .update(formPages)
+            .set({ pageNumber: newPageNumber })
+            .where(eq(formPages.id, oldPage.id));
+
+          await tx
+            .update(questions)
+            .set({ pageNumber: newPageNumber })
+            .where(
+              and(
+                eq(questions.formId, formId),
+                eq(questions.pageNumber, oldPage.pageNumber)
+              )
+            );
+        }
+      }
+    });
+
+    return { success: true };
+  }),
+
+reorderPages: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+      pageIds: z.array(z.string().uuid()).min(1),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [form] = await db
+      .select({ id: forms.id })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found",
+      });
+    }
+
+    const existingPages = await db
+      .select()
+      .from(formPages)
+      .where(eq(formPages.formId, input.formId))
+      .orderBy(asc(formPages.pageNumber));
+
+    const existingIds = existingPages.map((page) => page.id);
+
+    if (
+      input.pageIds.length !== existingIds.length ||
+      new Set(input.pageIds).size !== existingIds.length ||
+      !input.pageIds.every((id) => existingIds.includes(id))
+    ) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Invalid page order",
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      const maxPageNumber = Math.max(
+        ...existingPages.map((page) => page.pageNumber)
+      );
+
+      const offset = maxPageNumber + existingPages.length + 1;
+
+      // Move all pages and their questions to temporary page numbers.
+      for (let index = 0; index < existingPages.length; index++) {
+        const page = existingPages[index];
+        const temporaryNumber = offset + index;
+
+        await tx
+          .update(formPages)
+          .set({ pageNumber: temporaryNumber })
+          .where(eq(formPages.id, page.id));
+
+        await tx
+          .update(questions)
+          .set({ pageNumber: temporaryNumber })
+          .where(
+            and(
+              eq(questions.formId, input.formId),
+              eq(questions.pageNumber, page.pageNumber)
+            )
+          );
+      }
+
+      // Assign the final page numbers in the requested order.
+      for (let index = 0; index < input.pageIds.length; index++) {
+        const pageId = input.pageIds[index];
+        const originalIndex = existingPages.findIndex(
+          (page) => page.id === pageId
+        );
+
+        const temporaryNumber = offset + originalIndex;
+        const newPageNumber = index + 1;
+
+        await tx
+          .update(formPages)
+          .set({ pageNumber: newPageNumber })
+          .where(eq(formPages.id, pageId));
+
+        await tx
+          .update(questions)
+          .set({ pageNumber: newPageNumber })
+          .where(
+            and(
+              eq(questions.formId, input.formId),
+              eq(questions.pageNumber, temporaryNumber)
+            )
+          );
+      }
+    });
+
+    return { success: true };
+  }),
 
   getQuestionsByForm: protectedProcedure
     .input(formIdSchema)
@@ -878,117 +1347,124 @@ submitPublicResponse: publicProcedure
   // QUESTIONS - CREATE
   // ----------------------------------------------
 
-  createQuestion: protectedProcedure
-    .input(questionInputSchema)
-    .mutation(async ({ ctx, input }) => {
-      const [form] = await db
-        .select({ id: forms.id })
-        .from(forms)
-        .where(
-          and(
-            eq(forms.id, input.formId),
-            eq(forms.ownerId, ctx.session.user.id)
-          )
+createQuestion: protectedProcedure
+  .input(questionInputSchema)
+  .mutation(async ({ ctx, input }) => {
+    const [form] = await db
+      .select({ id: forms.id })
+      .from(forms)
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
         )
-        .limit(1);
+      )
+      .limit(1);
 
-      if (!form) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Form not found.",
-        });
-      }
+    if (!form) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found.",
+      });
+    }
 
-      const config = input.config ?? {};
+    const config = input.config ?? {};
 
-      validateQuestionConfig(input.type, config);
+    validateQuestionConfig(input.type, config);
 
-      const [lastQuestion] = await db
-        .select({ position: questions.position })
-        .from(questions)
-        .where(eq(questions.formId, input.formId))
-        .orderBy(desc(questions.position))
-        .limit(1);
+    const [lastQuestion] = await db
+      .select({ position: questions.position })
+      .from(questions)
+      .where(eq(questions.formId, input.formId))
+      .orderBy(desc(questions.position))
+      .limit(1);
 
-      const nextPosition = lastQuestion
-        ? lastQuestion.position + 1
-        : 1;
+    const nextPosition = lastQuestion
+      ? lastQuestion.position + 1
+      : 1;
 
-      const [newQuestion] = await db
-        .insert(questions)
-        .values({
-          formId: input.formId,
-          title: input.title,
-          description: input.description,
-          type: input.type,
-          required: input.required,
-          position: nextPosition,
-          config,
-        })
-        .returning();
+    const [newQuestion] = await db
+      .insert(questions)
+      .values({
+        formId: input.formId,
+        title: input.title,
+        description: input.description,
+        type: input.type,
+        required: input.required,
+        position: nextPosition,
+        pageNumber: input.pageNumber ?? 1,
+        config,
+      })
+      .returning();
 
-      return {
-        message: "Question created successfully!",
-        question: newQuestion,
-      };
-    }),
+    return {
+      message: "Question created successfully!",
+      question: newQuestion,
+    };
+  }),
 
   // ----------------------------------------------
   // QUESTIONS - UPDATE
   // ----------------------------------------------
 
-  updateQuestion: protectedProcedure
-    .input(
-      questionIdSchema.extend({
-        title: z.string().trim().min(1).max(200),
-        description: z.string().trim().max(500).optional(),
-        type: questionTypeSchema,
-        required: z.boolean(),
-        config: questionConfigSchema,
+updateQuestion: protectedProcedure
+  .input(
+    questionIdSchema.extend({
+      title: z.string().trim().min(1).max(200),
+      description: z.string().trim().max(500).optional(),
+      type: questionTypeSchema,
+      required: z.boolean(),
+      config: questionConfigSchema,
+      pageNumber: z.number().int().min(1).optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [existingQuestion] = await db
+      .select({ id: questions.id })
+      .from(questions)
+      .innerJoin(
+        forms,
+        eq(questions.formId, forms.id)
+      )
+      .where(
+        and(
+          eq(questions.id, input.questionId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (!existingQuestion) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Question not found.",
+      });
+    }
+
+    validateQuestionConfig(input.type, input.config);
+
+    const [updatedQuestion] = await db
+      .update(questions)
+      .set({
+        title: input.title,
+        description: input.description,
+        type: input.type,
+        required: input.required,
+        config: input.config,
+
+        ...(input.pageNumber !== undefined
+          ? { pageNumber: input.pageNumber }
+          : {}),
       })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [existingQuestion] = await db
-        .select({ id: questions.id })
-        .from(questions)
-        .innerJoin(
-          forms,
-          eq(questions.formId, forms.id)
-        )
-        .where(
-          and(
-            eq(questions.id, input.questionId),
-            eq(forms.ownerId, ctx.session.user.id)
-          )
-        )
-        .limit(1);
+      .where(eq(questions.id, input.questionId))
+      .returning();
 
-      if (!existingQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
-        });
-      }
+    return {
+      message: "Question updated successfully!",
+      question: updatedQuestion,
+    };
+  }),
 
-      validateQuestionConfig(input.type, input.config);
-
-      const [updatedQuestion] = await db
-        .update(questions)
-        .set({
-          title: input.title,
-          description: input.description,
-          type: input.type,
-          required: input.required,
-          config: input.config,
-        })
-        .where(eq(questions.id, input.questionId))
-        .returning();
-
-      return {
-        message: "Question updated successfully!",
-        question: updatedQuestion,
-      };
-    }),
 
   // ----------------------------------------------
   // QUESTIONS - DELETE

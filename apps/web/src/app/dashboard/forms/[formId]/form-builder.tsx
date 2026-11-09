@@ -23,7 +23,6 @@ import {
 } from "@dnd-kit/sortable";
 
 import { CSS } from "@dnd-kit/utilities";
-
 import { trpc } from "@/utils/trpc";
 
 const questionTypes = [
@@ -37,7 +36,6 @@ const questionTypes = [
 ] as const;
 
 type QuestionType = (typeof questionTypes)[number]["value"];
-
 type LogicOperator = "equals" | "notEquals" | "contains";
 
 type QuestionLogic = {
@@ -60,6 +58,8 @@ type QuestionCardData = {
   description: string | null;
   type: QuestionType;
   required: boolean;
+  position: number;
+  pageNumber: number;
   config?: unknown;
 };
 
@@ -93,13 +93,11 @@ function getOperators(sourceType: QuestionType): {
   ];
 }
 
-// Evaluate conditional logic using an earlier question's answer.
 function matchesCondition(
   sourceQuestion: QuestionCardData,
   answer: AnswerValue | undefined,
   logic: QuestionLogic
 ): boolean {
-  // An unanswered question never matches, including notEquals.
   if (
     answer === undefined ||
     answer === null ||
@@ -144,7 +142,6 @@ function matchesCondition(
   return false;
 }
 
-// Calculate which questions should currently be visible.
 function calculateVisibleQuestions(
   questions: QuestionCardData[],
   answers: PreviewAnswers
@@ -168,44 +165,42 @@ function calculateVisibleQuestions(
       continue;
     }
 
-    // A hidden source question cannot provide an answer.
     const sourceIsVisible = visibleQuestions.some(
       (item) => item.id === logic.questionId
     );
 
     const matches = sourceIsVisible
-      ? matchesCondition(
-          sourceQuestion,
-          answers[logic.questionId],
-          logic
-        )
+      ? matchesCondition(sourceQuestion, answers[logic.questionId], logic)
       : false;
 
     const shouldShow =
       logic.action === "show" ? matches : !matches;
 
-    if (shouldShow) {
-      visibleQuestions.push(question);
-    }
+    if (shouldShow) visibleQuestions.push(question);
   }
 
   return visibleQuestions;
 }
 
-// Sortable question card
 function SortableQuestionCard({
   question,
   index,
+  pages,
   onEdit,
   onDelete,
+  onMove,
   isDeleting,
+  isMoving,
   logicDescription,
 }: {
   question: QuestionCardData;
   index: number;
+  pages: { id: string; pageNumber: number; title: string }[];
   onEdit: () => void;
   onDelete: () => void;
+  onMove: (pageNumber: number) => void;
   isDeleting: boolean;
+  isMoving: boolean;
   logicDescription?: string;
 }) {
   const {
@@ -242,7 +237,7 @@ function SortableQuestionCard({
         {...listeners}
         aria-label="Drag to reorder question"
         title="Drag to reorder"
-        className="absolute left-4 top-1/2 flex size-9 -translate-y-1/2 touch-none cursor-grab items-center justify-center rounded-lg border border-border bg-white text-xl text-muted transition hover:border-[#B7B09E] hover:bg-cream hover:text-foreground active:cursor-grabbing"
+        className="absolute left-4 top-1/2 flex size-9 -translate-y-1/2 touch-none cursor-grab items-center justify-center rounded-lg border border-border bg-white text-xl text-muted transition hover:border-[#B7B09E] hover:bg-cream active:cursor-grabbing"
       >
         ⠿
       </button>
@@ -269,14 +264,9 @@ function SortableQuestionCard({
 
       {(question.type === "select" || question.type === "checkbox") && (
         <div className="mt-4 space-y-2">
-          {config.options?.map((option, optionIndex) => (
-            <p
-              key={optionIndex}
-              className="flex items-center gap-2 text-sm text-muted"
-            >
-              <span>
-                {question.type === "checkbox" ? "☐" : "○"}
-              </span>
+          {config.options?.map((option, i) => (
+            <p key={i} className="flex items-center gap-2 text-sm text-muted">
+              <span>{question.type === "checkbox" ? "☐" : "○"}</span>
               {option}
             </p>
           ))}
@@ -285,16 +275,14 @@ function SortableQuestionCard({
 
       {(question.type === "number" || question.type === "rating") && (
         <p className="mt-3 text-xs text-muted">
-          Range: {config.min ?? "No minimum"} –{" "}
-          {config.max ?? "No maximum"}
+          Range: {config.min ?? "No minimum"} – {config.max ?? "No maximum"}
         </p>
       )}
 
       {config.logic && (
         <div className="mt-4 rounded-lg border border-[#DED6C1] bg-[#FAF9F6] p-3">
           <p className="text-xs font-semibold text-[#766747]">
-            <span className="mr-1">↳</span>
-            CONDITIONAL LOGIC
+            ↳ CONDITIONAL LOGIC
           </p>
           <p className="mt-1 text-sm text-foreground">
             {logicDescription ??
@@ -303,7 +291,7 @@ function SortableQuestionCard({
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <span
           className={`text-xs font-medium ${
             question.required ? "text-[#8A7652]" : "text-muted"
@@ -312,7 +300,23 @@ function SortableQuestionCard({
           {question.required ? "Required" : "Optional"}
         </span>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {pages.length > 1 && (
+            <select
+              value={question.pageNumber}
+              disabled={isMoving}
+              onChange={(e) => onMove(Number(e.target.value))}
+              aria-label="Move question to page"
+              className="max-w-36 rounded-lg border border-border bg-white px-2 py-2 text-xs disabled:opacity-50"
+            >
+              {pages.map((page) => (
+                <option key={page.id} value={page.pageNumber}>
+                  Move to: {page.title}
+                </option>
+              ))}
+            </select>
+          )}
+
           <button
             type="button"
             onClick={onEdit}
@@ -335,7 +339,6 @@ function SortableQuestionCard({
   );
 }
 
-// Interactive respondent-facing preview question
 function QuestionPreview({
   question,
   index,
@@ -357,15 +360,11 @@ function QuestionPreview({
       <div>
         <label className="text-base font-semibold text-foreground">
           {index + 1}. {question.title}
-          {question.required && (
-            <span className="ml-1 text-red-500">*</span>
-          )}
+          {question.required && <span className="ml-1 text-red-500">*</span>}
         </label>
 
         {question.description && (
-          <p className="mt-1 text-sm text-muted">
-            {question.description}
-          </p>
+          <p className="mt-1 text-sm text-muted">{question.description}</p>
         )}
       </div>
 
@@ -400,7 +399,7 @@ function QuestionPreview({
               : ""
           }
           onChange={(e) => onChange(e.target.value)}
-          placeholder={`Enter a number (${config.min ?? "any"} – ${config.max ?? "any"})`}
+          placeholder="Enter a number"
           className={inputClass}
         />
       )}
@@ -421,7 +420,6 @@ function QuestionPreview({
           className={inputClass}
         >
           <option value="">Select an option</option>
-
           {config.options?.map((option, i) => (
             <option key={i} value={option}>
               {option}
@@ -446,14 +444,10 @@ function QuestionPreview({
                   type="checkbox"
                   checked={selected}
                   onChange={(e) => {
-                    const current = Array.isArray(answer)
-                      ? answer
-                      : [];
-
+                    const current = Array.isArray(answer) ? answer : [];
                     const updated = e.target.checked
                       ? [...current, option]
                       : current.filter((item) => item !== option);
-
                     onChange(updated);
                   }}
                   className="size-4 accent-[#B7B09E]"
@@ -470,32 +464,25 @@ function QuestionPreview({
           {Array.from(
             {
               length: Math.min(
-                Math.max(
-                  (config.max ?? 5) - (config.min ?? 1) + 1,
-                  1
-                ),
+                Math.max((config.max ?? 5) - (config.min ?? 1) + 1, 1),
                 20
               ),
             },
             (_, i) => i + (config.min ?? 1)
-          ).map((value) => {
-            const isSelected = Number(answer) === value;
-
-            return (
-              <button
-                type="button"
-                key={value}
-                onClick={() => onChange(value)}
-                className={`flex size-10 items-center justify-center rounded-lg border text-sm font-medium transition ${
-                  isSelected
-                    ? "border-[#8A7652] bg-[#DED6C1] text-[#302E29]"
-                    : "border-border bg-white text-muted hover:border-[#B7B09E] hover:bg-cream"
-                }`}
-              >
-                {value}
-              </button>
-            );
-          })}
+          ).map((value) => (
+            <button
+              type="button"
+              key={value}
+              onClick={() => onChange(value)}
+              className={`flex size-10 items-center justify-center rounded-lg border text-sm font-medium transition ${
+                Number(answer) === value
+                  ? "border-[#8A7652] bg-[#DED6C1] text-[#302E29]"
+                  : "border-border bg-white text-muted hover:border-[#B7B09E] hover:bg-cream"
+              }`}
+            >
+              {value}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -510,39 +497,38 @@ export default function FormBuilder() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isLinkCopied, setIsLinkCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
-  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(
-    null
-  );
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<QuestionType>("text");
   const [required, setRequired] = useState(false);
-
   const [options, setOptions] = useState(["Option 1", "Option 2"]);
   const [min, setMin] = useState("1");
   const [max, setMax] = useState("5");
 
-  // Conditional logic editor state
   const [logicEnabled, setLogicEnabled] = useState(false);
   const [logicAction, setLogicAction] = useState<"show" | "hide">("show");
   const [logicQuestionId, setLogicQuestionId] = useState("");
-  const [logicOperator, setLogicOperator] =
-    useState<LogicOperator>("equals");
+  const [logicOperator, setLogicOperator] = useState<LogicOperator>("equals");
   const [logicValue, setLogicValue] = useState("");
 
-  // Interactive preview answers
-  const [previewAnswers, setPreviewAnswers] =
-    useState<PreviewAnswers>({});
+  const [previewAnswers, setPreviewAnswers] = useState<PreviewAnswers>({});
+  const [previewPageNumber, setPreviewPageNumber] = useState(1);
+
+  const [selectedPageNumber, setSelectedPageNumber] = useState(1);
+  const [newPageTitle, setNewPageTitle] = useState("");
+  const [editingPageTitle, setEditingPageTitle] = useState("");
+  const [editingPageDescription, setEditingPageDescription] = useState("");
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  const utils = trpc.useUtils();
 
   const {
     data: form,
@@ -556,83 +542,131 @@ export default function FormBuilder() {
     isError: areQuestionsError,
   } = trpc.getQuestionsByForm.useQuery({ formId });
 
-  const utils = trpc.useUtils();
+  const {
+    data: pages,
+    isLoading: arePagesLoading,
+    isError: arePagesError,
+  } = trpc.getPages.useQuery({ formId });
 
-  // Calculate preview visibility from the current answers.
-  const questionList = questions ?? [];
+  const questionList = useMemo(
+    () =>
+      [...(questions ?? [])].sort(
+        (a, b) =>
+          a.pageNumber - b.pageNumber || a.position - b.position
+      ) as QuestionCardData[],
+    [questions]
+  );
+
+  const pageList = useMemo(
+    () =>
+      [...(pages ?? [])].sort((a, b) => a.pageNumber - b.pageNumber),
+    [pages]
+  );
+
+  const currentPage = pageList.find(
+    (page) => page.pageNumber === selectedPageNumber
+  );
+
+  useEffect(() => {
+    if (pageList.length > 0 && !pageList.some(
+      (page) => page.pageNumber === selectedPageNumber
+    )) {
+      setSelectedPageNumber(pageList[0].pageNumber);
+    }
+  }, [pageList, selectedPageNumber]);
+
+  useEffect(() => {
+    if (currentPage) {
+      setEditingPageTitle(currentPage.title);
+      setEditingPageDescription(currentPage.description ?? "");
+    }
+  }, [currentPage?.id, currentPage?.title, currentPage?.description]);
+
+  const currentPageQuestions = questionList.filter(
+    (question) => question.pageNumber === selectedPageNumber
+  );
 
   const visiblePreviewQuestions = useMemo(
-    () =>
-      calculateVisibleQuestions(
-        questionList as QuestionCardData[],
-        previewAnswers
-      ),
+    () => calculateVisibleQuestions(questionList, previewAnswers),
     [questionList, previewAnswers]
   );
 
-const visibleQuestionIds = useMemo(
-  () => visiblePreviewQuestions.map((question) => question.id).join("|"),
-  [visiblePreviewQuestions]
-);
-
-// Clear answers only when the visible question list changes.
-useEffect(() => {
-  const visibleIds = new Set(
-    visibleQuestionIds ? visibleQuestionIds.split("|") : []
+  const visibleQuestionIds = useMemo(
+    () => visiblePreviewQuestions.map((question) => question.id).join("|"),
+    [visiblePreviewQuestions]
   );
 
-  setPreviewAnswers((current) => {
-    const updated = { ...current };
-    let changed = false;
+  useEffect(() => {
+    const visibleIds = new Set(
+      visibleQuestionIds ? visibleQuestionIds.split("|") : []
+    );
 
-    for (const questionId of Object.keys(updated)) {
-      if (!visibleIds.has(questionId)) {
-        delete updated[questionId];
-        changed = true;
+    setPreviewAnswers((current) => {
+      const updated = { ...current };
+      let changed = false;
+
+      for (const questionId of Object.keys(updated)) {
+        if (!visibleIds.has(questionId)) {
+          delete updated[questionId];
+          changed = true;
+        }
       }
-    }
 
-    return changed ? updated : current;
-  });
-}, [visibleQuestionIds]);
+      return changed ? updated : current;
+    });
+  }, [visibleQuestionIds]);
 
-  const handlePreviewAnswerChange = (
-    questionId: string,
-    value: AnswerValue
-  ) => {
-    setPreviewAnswers((current) => ({
-      ...current,
-      [questionId]: value,
-    }));
-  };
+  const visiblePreviewPages = pageList.filter((page) =>
+    visiblePreviewQuestions.some(
+      (question) => question.pageNumber === page.pageNumber
+    )
+  );
 
-  const openPreview = () => {
-    setPreviewAnswers({});
-    setIsPreviewOpen(true);
-  };
+  const currentPreviewPageQuestions = visiblePreviewQuestions.filter(
+    (question) => question.pageNumber === previewPageNumber
+  );
 
   const refreshQuestions = async () => {
     await utils.getQuestionsByForm.invalidate({ formId });
   };
 
-  const resetFields = () => {
-    setTitle("");
-    setDescription("");
-    setType("text");
-    setRequired(false);
-    setOptions(["Option 1", "Option 2"]);
-    setMin("1");
-    setMax("5");
-
-    setLogicEnabled(false);
-    setLogicAction("show");
-    setLogicQuestionId("");
-    setLogicOperator("equals");
-    setLogicValue("");
-
-    setEditingQuestionId(null);
-    setIsModalOpen(false);
+  const refreshPages = async () => {
+    await utils.getPages.invalidate({ formId });
   };
+
+  const refreshForm = async () => {
+    await utils.getFormById.invalidate({ formId });
+    await utils.getMyForms.invalidate();
+  };
+
+  const createPageMutation = trpc.createPage.useMutation({
+    onSuccess: async () => {
+      const nextPageNumber =
+        Math.max(0, ...pageList.map((page) => page.pageNumber)) + 1;
+
+      await refreshPages();
+      setSelectedPageNumber(nextPageNumber);
+      setNewPageTitle("");
+    },
+  });
+
+  const updatePageMutation = trpc.updatePage.useMutation({
+    onSuccess: refreshPages,
+  });
+
+  const deletePageMutation = trpc.deletePage.useMutation({
+    onSuccess: async () => {
+      await Promise.all([refreshPages(), refreshQuestions()]);
+    },
+  });
+
+  const reorderPagesMutation = trpc.reorderPages.useMutation({
+    onSuccess: refreshPages,
+  });
+
+  const moveQuestionMutation = trpc.moveQuestionToPage.useMutation({
+    onSuccess: refreshQuestions,
+  });
 
   const createQuestionMutation = trpc.createQuestion.useMutation({
     onSuccess: async () => {
@@ -656,11 +690,6 @@ useEffect(() => {
     onSuccess: refreshQuestions,
   });
 
-  const refreshForm = async () => {
-    await utils.getFormById.invalidate({ formId });
-    await utils.getMyForms.invalidate();
-  };
-
   const publishMutation = trpc.publishForm.useMutation({
     onSuccess: refreshForm,
   });
@@ -673,12 +702,28 @@ useEffect(() => {
     onSuccess: refreshForm,
   });
 
-  // Only earlier questions can be used as logic sources.
-  const currentQuestionIndex = editingQuestionId
-    ? questions?.findIndex((question) => question.id === editingQuestionId) ?? -1
-    : questions?.length ?? 0;
+  function resetFields() {
+    setTitle("");
+    setDescription("");
+    setType("text");
+    setRequired(false);
+    setOptions(["Option 1", "Option 2"]);
+    setMin("1");
+    setMax("5");
+    setLogicEnabled(false);
+    setLogicAction("show");
+    setLogicQuestionId("");
+    setLogicOperator("equals");
+    setLogicValue("");
+    setEditingQuestionId(null);
+    setIsModalOpen(false);
+  }
 
-  const availableLogicQuestions = (questions ?? []).filter(
+  const currentQuestionIndex = editingQuestionId
+    ? questionList.findIndex((question) => question.id === editingQuestionId)
+    : questionList.length;
+
+  const availableLogicQuestions = questionList.filter(
     (_, index) => index < currentQuestionIndex
   );
 
@@ -730,7 +775,7 @@ useEffect(() => {
   };
 
   const openEditModal = (
-    question: NonNullable<typeof questions>[number]
+    question: QuestionCardData
   ) => {
     const config = getConfig(question.config);
 
@@ -739,7 +784,6 @@ useEffect(() => {
     setDescription(question.description ?? "");
     setType(question.type as QuestionType);
     setRequired(question.required);
-
     setOptions(config.options ?? ["Option 1", "Option 2"]);
     setMin(String(config.min ?? 1));
     setMax(String(config.max ?? 5));
@@ -752,7 +796,6 @@ useEffect(() => {
 
     createQuestionMutation.reset();
     updateQuestionMutation.reset();
-
     setIsModalOpen(true);
   };
 
@@ -767,9 +810,7 @@ useEffect(() => {
     const config: QuestionConfig = {};
 
     if (type === "select" || type === "checkbox") {
-      config.options = options
-        .map((option) => option.trim())
-        .filter(Boolean);
+      config.options = options.map((option) => option.trim()).filter(Boolean);
     }
 
     if (type === "number" || type === "rating") {
@@ -807,6 +848,9 @@ useEffect(() => {
         type,
         required,
         config,
+        pageNumber: questionList.find(
+          (question) => question.id === editingQuestionId
+        )?.pageNumber ?? selectedPageNumber,
       });
     } else {
       createQuestionMutation.mutate({
@@ -816,45 +860,81 @@ useEffect(() => {
         type,
         required,
         config,
+        pageNumber: selectedPageNumber,
       });
     }
   };
 
   const handleDelete = (questionId: string) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this question?"
-    );
-
-    if (confirmed) {
+    if (window.confirm("Are you sure you want to delete this question?")) {
       deleteQuestionMutation.mutate({ questionId });
     }
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleQuestionDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
-    if (!over || active.id === over.id || !questions) return;
+    if (!over || active.id === over.id) return;
 
-    const oldIndex = questions.findIndex(
+    const oldIndex = currentPageQuestions.findIndex(
       (question) => question.id === active.id
     );
 
-    const newIndex = questions.findIndex(
+    const newIndex = currentPageQuestions.findIndex(
       (question) => question.id === over.id
     );
 
     if (oldIndex === -1 || newIndex === -1) return;
 
-    const updatedQuestions = arrayMove(
-      [...questions],
-      oldIndex,
-      newIndex
-    );
+    const updated = arrayMove(currentPageQuestions, oldIndex, newIndex);
 
     reorderQuestionsMutation.mutate({
       formId,
-      questionIds: updatedQuestions.map((question) => question.id),
+      questionIds: updated.map((question) => question.id),
     });
+  };
+
+  const handlePageDragEnd = (direction: -1 | 1) => {
+    const currentIndex = pageList.findIndex(
+      (page) => page.pageNumber === selectedPageNumber
+    );
+
+    const targetIndex = currentIndex + direction;
+
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= pageList.length) {
+      return;
+    }
+
+    const updated = [...pageList];
+    const [movedPage] = updated.splice(currentIndex, 1);
+    updated.splice(targetIndex, 0, movedPage);
+
+    reorderPagesMutation.mutate({
+      formId,
+      pageIds: updated.map((page) => page.id),
+    });
+  };
+
+  const handleSavePageDetails = () => {
+    if (!currentPage || !editingPageTitle.trim()) return;
+
+    updatePageMutation.mutate({
+      pageId: currentPage.id,
+      title: editingPageTitle.trim(),
+      description: editingPageDescription.trim() || undefined,
+    });
+  };
+
+  const handleDeletePage = () => {
+    if (!currentPage || pageList.length <= 1) return;
+
+    const confirmed = window.confirm(
+      `Delete "${currentPage.title}"? Its questions will be moved to another page.`
+    );
+
+    if (confirmed) {
+      deletePageMutation.mutate({ pageId: currentPage.id });
+    }
   };
 
   const handleCopyShareLink = async () => {
@@ -872,9 +952,16 @@ useEffect(() => {
     }
   };
 
+  const openPreview = () => {
+    setPreviewAnswers({});
+    setPreviewPageNumber(
+      visiblePreviewPages[0]?.pageNumber ?? pageList[0]?.pageNumber ?? 1
+    );
+    setIsPreviewOpen(true);
+  };
+
   const isSaving =
-    createQuestionMutation.isPending ||
-    updateQuestionMutation.isPending;
+    createQuestionMutation.isPending || updateQuestionMutation.isPending;
 
   const mutationError =
     createQuestionMutation.error?.message ||
@@ -901,43 +988,28 @@ useEffect(() => {
         selectedLogicQuestionType === "rating") &&
         !Number.isFinite(Number(logicValue))));
 
-  if (isFormLoading || areQuestionsLoading) {
-    return (
-      <div className="p-8 text-sm text-muted">
-        Loading form builder...
-      </div>
-    );
+  if (isFormLoading || areQuestionsLoading || arePagesLoading) {
+    return <div className="p-8 text-sm text-muted">Loading form builder...</div>;
   }
 
   if (isFormError || !form) {
-    return (
-      <div className="p-8 text-sm text-red-600">
-        Form not found.
-      </div>
-    );
+    return <div className="p-8 text-sm text-red-600">Form not found.</div>;
   }
 
-  if (areQuestionsError || !questions) {
+  if (areQuestionsError || !questions || arePagesError || !pages) {
     return (
       <div className="p-8 text-sm text-red-600">
-        Failed to load questions.
+        Failed to load form questions or pages.
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
       <header className="flex flex-col justify-between gap-5 border-b border-border px-6 py-6 sm:flex-row sm:items-center sm:px-10">
         <div>
-          <p className="text-sm text-muted">
-            FormFlow / Form Builder
-          </p>
-
-          <h1 className="mt-2 text-2xl font-semibold">
-            {form.title}
-          </h1>
-
+          <p className="text-sm text-muted">FormFlow / Form Builder</p>
+          <h1 className="mt-2 text-2xl font-semibold">{form.title}</h1>
           <p className="mt-1 text-sm text-muted">
             {form.description || "No description added."}
           </p>
@@ -958,12 +1030,12 @@ useEffect(() => {
             <select
               value={form.visibility}
               disabled={visibilityMutation.isPending}
-              onChange={(e) => {
+              onChange={(e) =>
                 visibilityMutation.mutate({
                   formId,
                   visibility: e.target.value as "public" | "unlisted",
-                });
-              }}
+                })
+              }
               className="rounded-lg border border-border bg-white px-3 py-3 text-sm"
             >
               <option value="unlisted">Unlisted</option>
@@ -977,9 +1049,7 @@ useEffect(() => {
                 disabled={unpublishMutation.isPending}
                 className="rounded-lg border border-border px-4 py-3 text-sm font-semibold hover:bg-cream disabled:opacity-50"
               >
-                {unpublishMutation.isPending
-                  ? "Unpublishing..."
-                  : "Unpublish"}
+                {unpublishMutation.isPending ? "Unpublishing..." : "Unpublish"}
               </button>
             ) : (
               <button
@@ -990,14 +1060,10 @@ useEffect(() => {
                     visibility: form.visibility,
                   })
                 }
-                disabled={
-                  publishMutation.isPending || questions.length === 0
-                }
+                disabled={publishMutation.isPending || questions.length === 0}
                 className="rounded-lg bg-[#302E29] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:opacity-50"
               >
-                {publishMutation.isPending
-                  ? "Publishing..."
-                  : "Publish Form"}
+                {publishMutation.isPending ? "Publishing..." : "Publish Form"}
               </button>
             )}
           </div>
@@ -1007,8 +1073,7 @@ useEffect(() => {
             onClick={openPreview}
             className="rounded-lg border border-border px-5 py-3 text-sm font-semibold transition hover:bg-cream"
           >
-            <span className="mr-2">◉</span>
-            Preview Form
+            ◉ Preview Form
           </button>
 
           <button
@@ -1022,9 +1087,7 @@ useEffect(() => {
           <button
             type="button"
             onClick={() =>
-              window.location.assign(
-                `/dashboard/forms/${formId}/responses`
-              )
+              window.location.assign(`/dashboard/forms/${formId}/responses`)
             }
             className="rounded-lg border border-[#DED6C1] px-5 py-3 text-sm font-semibold text-[#302E29] transition hover:bg-cream"
           >
@@ -1037,9 +1100,7 @@ useEffect(() => {
         <div className="border-b border-border bg-[#FAF9F6] px-6 py-4 sm:px-10">
           <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold">
-                Your form is live!
-              </p>
+              <p className="text-sm font-semibold">Your form is live!</p>
               <p className="mt-1 text-xs text-muted">
                 Share this link with respondents.
               </p>
@@ -1075,63 +1136,235 @@ useEffect(() => {
         </p>
       )}
 
-      {/* Questions */}
       <main className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
         <div className="mb-8">
-          <h2 className="text-lg font-semibold">Questions</h2>
-
+          <h2 className="text-lg font-semibold">Form Structure</h2>
           <p className="mt-1 text-sm text-muted">
-            Create, customize and organize your form questions.
-            Drag questions to change their order.
+            Organize your questions into pages. Respondents will navigate one
+            page at a time.
           </p>
+        </div>
+
+        {/* Page navigation and management */}
+        <section className="mb-8 rounded-2xl border border-[#DED6C1] bg-[#FAF9F6] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Form Pages</h3>
+              <p className="mt-1 text-xs text-muted">
+                {pageList.length} {pageList.length === 1 ? "page" : "pages"} in
+                this form
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                createPageMutation.mutate({
+                  formId,
+                  title:
+                    newPageTitle.trim() ||
+                    `Page ${pageList.length + 1}`,
+                })
+              }
+              disabled={createPageMutation.isPending}
+              className="rounded-lg bg-[#302E29] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:opacity-50"
+            >
+              {createPageMutation.isPending ? "Creating..." : "+ Add Page"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={newPageTitle}
+              onChange={(e) => setNewPageTitle(e.target.value)}
+              maxLength={200}
+              placeholder={`New page title (default: Page ${pageList.length + 1})`}
+              className="min-w-0 flex-1 rounded-lg border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
+            />
+            <span className="self-center text-xs text-muted">
+              Optional custom title
+            </span>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {pageList.map((page) => (
+              <button
+                type="button"
+                key={page.id}
+                onClick={() => setSelectedPageNumber(page.pageNumber)}
+                className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition ${
+                  selectedPageNumber === page.pageNumber
+                    ? "border-[#8A7652] bg-[#DED6C1] text-[#302E29]"
+                    : "border-border bg-white text-muted hover:border-[#B7B09E]"
+                }`}
+              >
+                {page.pageNumber}. {page.title}
+                <span className="ml-2 text-xs opacity-70">
+                  (
+                  {
+                    questionList.filter(
+                      (question) => question.pageNumber === page.pageNumber
+                    ).length
+                  }
+                  )
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {currentPage && (
+            <div className="mt-5 border-t border-[#DED6C1] pt-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold">Page settings</h4>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePageDragEnd(-1)}
+                    disabled={
+                      selectedPageNumber === pageList[0]?.pageNumber ||
+                      reorderPagesMutation.isPending
+                    }
+                    title="Move page left"
+                    className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm disabled:opacity-40"
+                  >
+                    ←
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handlePageDragEnd(1)}
+                    disabled={
+                      selectedPageNumber ===
+                        pageList[pageList.length - 1]?.pageNumber ||
+                      reorderPagesMutation.isPending
+                    }
+                    title="Move page right"
+                    className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm disabled:opacity-40"
+                  >
+                    →
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDeletePage}
+                    disabled={
+                      pageList.length <= 1 || deletePageMutation.isPending
+                    }
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40"
+                  >
+                    {deletePageMutation.isPending ? "Deleting..." : "Delete Page"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <input
+                  value={editingPageTitle}
+                  onChange={(e) => setEditingPageTitle(e.target.value)}
+                  maxLength={200}
+                  placeholder="Page title"
+                  className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
+                />
+
+                <textarea
+                  value={editingPageDescription}
+                  onChange={(e) => setEditingPageDescription(e.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="Page description (optional)"
+                  className="w-full resize-none rounded-lg border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSavePageDetails}
+                  disabled={
+                    updatePageMutation.isPending ||
+                    !editingPageTitle.trim() ||
+                    (editingPageTitle === currentPage.title &&
+                      editingPageDescription ===
+                        (currentPage.description ?? ""))
+                  }
+                  className="rounded-lg border border-border bg-white px-4 py-2 text-xs font-semibold transition hover:bg-cream disabled:opacity-40"
+                >
+                  {updatePageMutation.isPending ? "Saving..." : "Save Page Details"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(createPageMutation.isError ||
+            updatePageMutation.isError ||
+            deletePageMutation.isError ||
+            reorderPagesMutation.isError) && (
+            <p className="mt-3 text-sm text-red-600">
+              {createPageMutation.error?.message ||
+                updatePageMutation.error?.message ||
+                deletePageMutation.error?.message ||
+                reorderPagesMutation.error?.message}
+            </p>
+          )}
+        </section>
+
+        {/* Questions for selected page */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {currentPage?.title ?? "Questions"}
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Add and organize questions on this page.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="rounded-lg bg-[#CFC6B1] px-4 py-2.5 text-sm font-semibold text-[#302E29] transition hover:bg-[#B7B09E]"
+          >
+            + Add Question
+          </button>
         </div>
 
         <div className="mb-5 flex items-center justify-between">
           <span className="text-sm font-medium text-muted">
-            {questions.length} Questions
+            {currentPageQuestions.length} Questions on this page
           </span>
-
-          {questions.length > 0 && (
-            <span className="text-xs text-muted">
-              Drag the handle to reorder
-            </span>
+          {currentPageQuestions.length > 1 && (
+            <span className="text-xs text-muted">Drag to reorder</span>
           )}
         </div>
 
-        {questions.length === 0 ? (
+        {currentPageQuestions.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[#CFC6B1] px-6 py-16 text-center">
             <div className="text-4xl text-[#B7B09E]">+</div>
-
-            <h3 className="mt-4 font-semibold">
-              No questions yet
-            </h3>
-
+            <h3 className="mt-4 font-semibold">This page is empty</h3>
             <p className="mt-2 text-sm text-muted">
-              Start building your form by adding your first question.
+              Add a question to get started on this page.
             </p>
-
             <button
               type="button"
               onClick={openCreateModal}
               className="mt-5 rounded-lg bg-[#CFC6B1] px-5 py-2.5 text-sm font-semibold transition hover:bg-[#B7B09E]"
             >
-              Add your first question
+              Add Question
             </button>
           </div>
         ) : (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
+            onDragEnd={handleQuestionDragEnd}
           >
             <SortableContext
-              items={questions.map((question) => question.id)}
+              items={currentPageQuestions.map((question) => question.id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-4">
-                {questions.map((question, index) => {
+                {currentPageQuestions.map((question, index) => {
                   const config = getConfig(question.config);
-                  const sourceQuestion = questions.find(
+                  const sourceQuestion = questionList.find(
                     (item) => item.id === config.logic?.questionId
                   );
 
@@ -1144,9 +1377,22 @@ useEffect(() => {
                       key={question.id}
                       question={question}
                       index={index}
+                      pages={pageList.map((page) => ({
+                        id: page.id,
+                        pageNumber: page.pageNumber,
+                        title: page.title,
+                      }))}
                       onEdit={() => openEditModal(question)}
                       onDelete={() => handleDelete(question.id)}
+                      onMove={(pageNumber) =>
+                        moveQuestionMutation.mutate({
+                          formId,
+                          questionId: question.id,
+                          pageNumber,
+                        })
+                      }
                       isDeleting={deleteQuestionMutation.isPending}
+                      isMoving={moveQuestionMutation.isPending}
                       logicDescription={logicDescription}
                     />
                   );
@@ -1156,39 +1402,40 @@ useEffect(() => {
           </DndContext>
         )}
 
-        {deleteQuestionMutation.isError && (
+        {(deleteQuestionMutation.isError ||
+          reorderQuestionsMutation.isError ||
+          moveQuestionMutation.isError) && (
           <p className="mt-4 text-sm text-red-600">
-            {deleteQuestionMutation.error.message}
+            {deleteQuestionMutation.error?.message ||
+              reorderQuestionsMutation.error?.message ||
+              moveQuestionMutation.error?.message}
           </p>
         )}
 
-        {reorderQuestionsMutation.isError && (
-          <p className="mt-4 text-sm text-red-600">
-            {reorderQuestionsMutation.error.message}
-          </p>
+        {(reorderQuestionsMutation.isPending ||
+          moveQuestionMutation.isPending) && (
+          <p className="mt-4 text-sm text-muted">Saving changes...</p>
         )}
 
-        {reorderQuestionsMutation.isPending && (
-          <p className="mt-4 text-sm text-muted">
-            Saving new question order...
+        <div className="mt-8 border-t border-border pt-5">
+          <p className="text-xs text-muted">
+            Form total: {questionList.length} questions across {pageList.length}{" "}
+            pages.
           </p>
-        )}
+        </div>
       </main>
 
-      {/* Create / Edit Modal */}
+      {/* Question create/edit modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-[2px]">
           <div className="my-auto w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <h2 className="text-xl font-semibold">
-                  {editingQuestionId
-                    ? "Edit question"
-                    : "Add a question"}
+                  {editingQuestionId ? "Edit question" : "Add a question"}
                 </h2>
-
                 <p className="mt-1 text-sm text-muted">
-                  Configure your question below.
+                  This question belongs to {currentPage?.title ?? "this page"}.
                 </p>
               </div>
 
@@ -1207,7 +1454,6 @@ useEffect(() => {
                 <label className="mb-2 block text-sm font-medium">
                   Question title *
                 </label>
-
                 <input
                   type="text"
                   value={title}
@@ -1223,7 +1469,6 @@ useEffect(() => {
                 <label className="mb-2 block text-sm font-medium">
                   Description
                 </label>
-
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -1238,7 +1483,6 @@ useEffect(() => {
                 <label className="mb-2 block text-sm font-medium">
                   Question type
                 </label>
-
                 <select
                   value={type}
                   onChange={(e) =>
@@ -1254,13 +1498,9 @@ useEffect(() => {
                 </select>
               </div>
 
-              {/* Options */}
               {(type === "select" || type === "checkbox") && (
                 <div className="space-y-3">
-                  <label className="block text-sm font-medium">
-                    Options
-                  </label>
-
+                  <label className="block text-sm font-medium">Options</label>
                   {options.map((option, index) => (
                     <div key={index} className="flex gap-2">
                       <input
@@ -1274,14 +1514,11 @@ useEffect(() => {
                         placeholder={`Option ${index + 1}`}
                         className="min-w-0 flex-1 rounded-lg border border-border px-4 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
                       />
-
                       <button
                         type="button"
                         disabled={options.length <= 2}
                         onClick={() =>
-                          setOptions(
-                            options.filter((_, i) => i !== index)
-                          )
+                          setOptions(options.filter((_, i) => i !== index))
                         }
                         className="rounded-lg border border-border px-3 text-sm text-muted hover:bg-cream disabled:opacity-40"
                       >
@@ -1289,15 +1526,11 @@ useEffect(() => {
                       </button>
                     </div>
                   ))}
-
                   <button
                     type="button"
                     disabled={options.length >= 50}
                     onClick={() =>
-                      setOptions([
-                        ...options,
-                        `Option ${options.length + 1}`,
-                      ])
+                      setOptions([...options, `Option ${options.length + 1}`])
                     }
                     className="text-sm font-medium text-muted hover:text-foreground disabled:opacity-40"
                   >
@@ -1306,19 +1539,16 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Number / Rating */}
               {(type === "number" || type === "rating") && (
                 <div>
                   <label className="mb-2 block text-sm font-medium">
                     {type === "rating" ? "Rating range" : "Number range"}
                   </label>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs text-muted">
                         Minimum
                       </label>
-
                       <input
                         type="number"
                         value={min}
@@ -1327,12 +1557,10 @@ useEffect(() => {
                         className="w-full rounded-lg border border-border px-4 py-2.5 text-sm outline-none focus:border-[#B7B09E]"
                       />
                     </div>
-
                     <div>
                       <label className="mb-1 block text-xs text-muted">
                         Maximum
                       </label>
-
                       <input
                         type="number"
                         value={max}
@@ -1342,31 +1570,25 @@ useEffect(() => {
                       />
                     </div>
                   </div>
-
-                  {min !== "" &&
-                    max !== "" &&
-                    Number(min) > Number(max) && (
-                      <p className="mt-2 text-xs text-red-600">
-                        Minimum cannot exceed maximum.
-                      </p>
-                    )}
+                  {min !== "" && max !== "" && Number(min) > Number(max) && (
+                    <p className="mt-2 text-xs text-red-600">
+                      Minimum cannot exceed maximum.
+                    </p>
+                  )}
                 </div>
               )}
 
-              {/* Conditional Logic */}
+              {/* Conditional logic */}
               <div className="rounded-xl border border-[#DED6C1] bg-[#FAF9F6] p-4">
                 <div className="flex items-start gap-3">
                   <input
                     id="enable-logic"
                     type="checkbox"
                     checked={logicEnabled}
-                    onChange={(e) => {
-                      setLogicEnabled(e.target.checked);
-                    }}
+                    onChange={(e) => setLogicEnabled(e.target.checked)}
                     disabled={availableLogicQuestions.length === 0}
                     className="mt-1 size-4 accent-[#8A7652]"
                   />
-
                   <div className="min-w-0 flex-1">
                     <label
                       htmlFor="enable-logic"
@@ -1374,18 +1596,17 @@ useEffect(() => {
                     >
                       Enable Conditional Logic
                     </label>
-
                     <p className="mt-1 text-xs leading-relaxed text-muted">
-                      Control when this question appears based on an
-                      earlier answer.
+                      Control when this question appears based on an earlier
+                      answer.
                     </p>
                   </div>
                 </div>
 
                 {availableLogicQuestions.length === 0 && (
                   <p className="mt-3 text-xs text-muted">
-                    Add another question before configuring conditional
-                    logic. Conditions can only refer to earlier questions.
+                    Add an earlier question before configuring conditional
+                    logic.
                   </p>
                 )}
 
@@ -1395,7 +1616,6 @@ useEffect(() => {
                       <label className="mb-2 block text-xs font-semibold text-muted">
                         ACTION
                       </label>
-
                       <select
                         value={logicAction}
                         onChange={(e) =>
@@ -1412,7 +1632,6 @@ useEffect(() => {
                       <label className="mb-2 block text-xs font-semibold text-muted">
                         WHEN THIS QUESTION
                       </label>
-
                       <select
                         value={logicQuestionId}
                         onChange={(e) =>
@@ -1422,7 +1641,6 @@ useEffect(() => {
                         className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
                       >
                         <option value="">Choose a previous question</option>
-
                         {availableLogicQuestions.map((question) => (
                           <option key={question.id} value={question.id}>
                             {question.title}
@@ -1437,21 +1655,15 @@ useEffect(() => {
                           <label className="mb-2 block text-xs font-semibold text-muted">
                             CONDITION
                           </label>
-
                           <select
                             value={logicOperator}
                             onChange={(e) =>
-                              setLogicOperator(
-                                e.target.value as LogicOperator
-                              )
+                              setLogicOperator(e.target.value as LogicOperator)
                             }
                             className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
                           >
                             {logicOperators.map((operator) => (
-                              <option
-                                key={operator.value}
-                                value={operator.value}
-                              >
+                              <option key={operator.value} value={operator.value}>
                                 {operator.label}
                               </option>
                             ))}
@@ -1462,7 +1674,6 @@ useEffect(() => {
                           <label className="mb-2 block text-xs font-semibold text-muted">
                             ANSWER VALUE
                           </label>
-
                           {(selectedLogicQuestionType === "select" ||
                             selectedLogicQuestionType === "checkbox") &&
                           getConfig(selectedLogicQuestion.config).options
@@ -1474,7 +1685,6 @@ useEffect(() => {
                               className="w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm"
                             >
                               <option value="">Choose an answer</option>
-
                               {getConfig(selectedLogicQuestion.config).options?.map(
                                 (option, index) => (
                                   <option key={index} value={option}>
@@ -1527,9 +1737,7 @@ useEffect(() => {
               </label>
 
               {mutationError && (
-                <p className="text-sm text-red-600">
-                  {mutationError}
-                </p>
+                <p className="text-sm text-red-600">{mutationError}</p>
               )}
 
               <div className="flex justify-end gap-3 pt-2">
@@ -1540,7 +1748,6 @@ useEffect(() => {
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   disabled={
@@ -1564,7 +1771,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Interactive Form Preview Modal */}
+      {/* Multi-page interactive preview */}
       {isPreviewOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/40 px-3 py-6 backdrop-blur-[2px] sm:px-6">
           <div className="my-auto w-full max-w-2xl overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl">
@@ -1577,7 +1784,6 @@ useEffect(() => {
                   Respondent view
                 </h2>
               </div>
-
               <button
                 type="button"
                 onClick={() => setIsPreviewOpen(false)}
@@ -1590,10 +1796,7 @@ useEffect(() => {
 
             <div className="max-h-[75vh] overflow-y-auto px-5 py-8 sm:px-10 sm:py-10">
               <div className="mb-8 border-b border-border pb-6">
-                <h1 className="text-2xl font-semibold">
-                  {form.title}
-                </h1>
-
+                <h1 className="text-2xl font-semibold">{form.title}</h1>
                 {form.description && (
                   <p className="mt-3 text-sm leading-relaxed text-muted">
                     {form.description}
@@ -1601,11 +1804,9 @@ useEffect(() => {
                 )}
               </div>
 
-              {questions.length === 0 ? (
+              {questionList.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[#CFC6B1] p-8 text-center">
-                  <p className="font-medium">
-                    Your form has no questions yet.
-                  </p>
+                  <p className="font-medium">Your form has no questions yet.</p>
                   <p className="mt-2 text-sm text-muted">
                     Add questions to see them in the preview.
                   </p>
@@ -1617,35 +1818,109 @@ useEffect(() => {
                   </p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {visiblePreviewQuestions.map((question, index) => (
-                    <QuestionPreview
-                      key={question.id}
-                      question={question}
-                      index={index}
-                      answer={previewAnswers[question.id]}
-                      onChange={(value) =>
-                        handlePreviewAnswerChange(question.id, value)
+                <>
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between text-xs text-muted">
+                      <span>
+                        Page {previewPageNumber} of {pageList.length}
+                      </span>
+                      <span>
+                        {currentPreviewPageQuestions.length} questions
+                      </span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#DED6C1]">
+                      <div
+                        className="h-full rounded-full bg-[#8A7652] transition-all"
+                        style={{
+                          width: `${
+                            (previewPageNumber / Math.max(pageList.length, 1)) *
+                            100
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold">
+                      {pageList.find(
+                        (page) => page.pageNumber === previewPageNumber
+                      )?.title ?? "Page"}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted">
+                      {
+                        pageList.find(
+                          (page) => page.pageNumber === previewPageNumber
+                        )?.description
                       }
-                    />
-                  ))}
-                </div>
+                    </p>
+                  </div>
+
+                  {currentPreviewPageQuestions.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-[#CFC6B1] p-5 text-sm text-muted">
+                      No questions are visible on this page.
+                    </p>
+                  ) : (
+                    <div className="space-y-8">
+                      {currentPreviewPageQuestions.map((question, index) => (
+                        <QuestionPreview
+                          key={question.id}
+                          question={question}
+                          index={index}
+                          answer={previewAnswers[question.id]}
+                          onChange={(value) =>
+                            setPreviewAnswers((current) => ({
+                              ...current,
+                              [question.id]: value,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-10 flex items-center justify-between border-t border-border pt-6">
+                    <button
+                      type="button"
+                      disabled={previewPageNumber === pageList[0]?.pageNumber}
+                      onClick={() => {
+                        const previous = [...visiblePreviewPages]
+                          .reverse()
+                          .find((page) => page.pageNumber < previewPageNumber);
+
+                        if (previous) setPreviewPageNumber(previous.pageNumber);
+                      }}
+                      className="rounded-lg border border-border px-5 py-3 text-sm font-semibold disabled:opacity-40"
+                    >
+                      ← Previous
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={
+                        previewPageNumber ===
+                        visiblePreviewPages[visiblePreviewPages.length - 1]
+                          ?.pageNumber
+                      }
+                      onClick={() => {
+                        const next = visiblePreviewPages.find(
+                          (page) => page.pageNumber > previewPageNumber
+                        );
+
+                        if (next) setPreviewPageNumber(next.pageNumber);
+                      }}
+                      className="rounded-lg bg-[#CFC6B1] px-6 py-3 text-sm font-semibold text-[#302E29] disabled:opacity-40"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                </>
               )}
 
-              <div className="mt-10 border-t border-border pt-6">
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-lg bg-[#CFC6B1] px-6 py-3 text-sm font-semibold text-[#302E29] opacity-70"
-                >
-                  Submit (Preview only)
-                </button>
-
-                <p className="mt-3 text-xs text-muted">
-                  Interactive preview: enter answers to test conditional
-                  questions. Responses cannot be submitted or saved.
-                </p>
-              </div>
+              <p className="mt-6 text-center text-xs text-muted">
+                Interactive preview only. Responses cannot be submitted or
+                saved.
+              </p>
             </div>
 
             <div className="flex justify-end border-t border-border bg-white px-5 py-4 sm:px-8">

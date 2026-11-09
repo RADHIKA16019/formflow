@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useParams } from "next/navigation";
@@ -21,6 +20,77 @@ type QuestionConfig = {
   logic?: QuestionLogic;
 };
 
+type Question = {
+  id: string;
+  title: string;
+  description: string | null;
+  type: "text" | "email" | "number" | "select" | "checkbox" | "rating" | "date";
+  required: boolean;
+  position: number;
+  pageNumber: number;
+  config?: unknown;
+};
+
+function validateQuestions(
+  questionsToValidate: Question[],
+  answers: Record<string, AnswerValue>
+) {
+  const newErrors: Record<string, string> = {};
+
+  questionsToValidate.forEach((question) => {
+    const answer = answers[question.id];
+    const config = question.config as QuestionConfig | null;
+
+    const isEmpty =
+      answer === undefined ||
+      answer === "" ||
+      (Array.isArray(answer) && answer.length === 0);
+
+    if (question.required && isEmpty) {
+      newErrors[question.id] = "This question is required.";
+      return;
+    }
+
+    if (isEmpty) return;
+
+    if (
+      question.type === "email" &&
+      typeof answer === "string" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)
+    ) {
+      newErrors[question.id] = "Please enter a valid email address.";
+    }
+
+    if (question.type === "number") {
+      const number = Number(answer);
+
+      if (!Number.isFinite(number)) {
+        newErrors[question.id] = "Please enter a valid number.";
+      } else {
+        if (config?.min !== undefined && number < config.min) {
+          newErrors[question.id] = `Minimum value is ${config.min}.`;
+        }
+
+        if (config?.max !== undefined && number > config.max) {
+          newErrors[question.id] = `Maximum value is ${config.max}.`;
+        }
+      }
+    }
+
+    if (question.type === "rating" && typeof answer === "number") {
+      if (config?.min !== undefined && answer < config.min) {
+        newErrors[question.id] = `Minimum value is ${config.min}.`;
+      }
+
+      if (config?.max !== undefined && answer > config.max) {
+        newErrors[question.id] = `Maximum value is ${config.max}.`;
+      }
+    }
+  });
+
+  return newErrors;
+}
+
 function PublicFormContent() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
@@ -28,6 +98,7 @@ function PublicFormContent() {
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [currentPageNumber, setCurrentPageNumber] = useState(1);
 
   const formQuery = trpc.getPublicFormBySlug.useQuery(
     { slug },
@@ -52,96 +123,200 @@ function PublicFormContent() {
     }));
   };
 
-const questions = formQuery.data?.questions ?? [];
+  const questions = formQuery.data?.questions ?? [];
+  const pages = formQuery.data?.pages ?? [];
 
-const visibleQuestions: typeof questions = [];
-const visibleAnswers: Record<string, AnswerValue> = {};
+  // Calculate conditional visibility across all pages.
+  const visibleQuestions: typeof questions = [];
+  const visibleAnswers: Record<string, AnswerValue> = {};
 
-questions.forEach((question) => {
-  const config = question.config as QuestionConfig | null;
-  const logic = config?.logic;
+  questions.forEach((question) => {
+    const config = question.config as QuestionConfig | null;
+    const logic = config?.logic;
 
-  let isVisible = true;
+    let isVisible = true;
 
-  if (logic) {
-    const sourceAnswer = visibleAnswers[logic.questionId];
+    if (logic) {
+      const sourceAnswer = visibleAnswers[logic.questionId];
 
-    let conditionMatches = false;
+      let conditionMatches = false;
 
-    const hasSourceAnswer =
-      sourceAnswer !== undefined &&
-      sourceAnswer !== "" &&
-      (!Array.isArray(sourceAnswer) || sourceAnswer.length > 0);
+      const hasSourceAnswer =
+        sourceAnswer !== undefined &&
+        sourceAnswer !== "" &&
+        (!Array.isArray(sourceAnswer) || sourceAnswer.length > 0);
 
-    if (hasSourceAnswer) {
-      if (logic.operator === "equals") {
-        conditionMatches = sourceAnswer === logic.value;
-      } else if (logic.operator === "notEquals") {
-        conditionMatches = sourceAnswer !== logic.value;
-      } else if (logic.operator === "contains") {
-        if (typeof sourceAnswer === "string") {
-          conditionMatches = sourceAnswer.includes(String(logic.value));
-        } else if (Array.isArray(sourceAnswer)) {
-          conditionMatches = sourceAnswer.includes(String(logic.value));
+      if (hasSourceAnswer) {
+        if (logic.operator === "equals") {
+          conditionMatches = sourceAnswer === logic.value;
+        } else if (logic.operator === "notEquals") {
+          conditionMatches = sourceAnswer !== logic.value;
+        } else if (logic.operator === "contains") {
+          if (typeof sourceAnswer === "string") {
+            conditionMatches = sourceAnswer.includes(String(logic.value));
+          } else if (Array.isArray(sourceAnswer)) {
+            conditionMatches = sourceAnswer.includes(String(logic.value));
+          }
         }
       }
+
+      isVisible =
+        logic.action === "show"
+          ? conditionMatches
+          : !conditionMatches;
     }
 
-    isVisible =
-      logic.action === "show"
-        ? conditionMatches
-        : !conditionMatches;
-  }
+    if (isVisible) {
+      visibleQuestions.push(question);
 
-  if (isVisible) {
-    visibleQuestions.push(question);
-
-    if (answers[question.id] !== undefined) {
-      visibleAnswers[question.id] = answers[question.id];
+      if (answers[question.id] !== undefined) {
+        visibleAnswers[question.id] = answers[question.id];
+      }
     }
-  }
-});
+  });
 
-useEffect(() => {
-  const visibleIds = new Set(
-    visibleQuestions.map((question) => question.id)
+  // Remove answers belonging to questions that became hidden.
+  const visibleQuestionIds = visibleQuestions
+    .map((question) => question.id)
+    .join("|");
+
+  useEffect(() => {
+    const visibleIds = new Set(
+      visibleQuestionIds ? visibleQuestionIds.split("|") : []
+    );
+
+    setAnswers((previous) => {
+      const cleaned: Record<string, AnswerValue> = {};
+      let changed = false;
+
+      Object.entries(previous).forEach(([id, value]) => {
+        if (visibleIds.has(id)) {
+          cleaned[id] = value;
+        } else {
+          changed = true;
+        }
+      });
+
+      return changed ? cleaned : previous;
+    });
+
+    setErrors((previous) => {
+      const cleaned: Record<string, string> = {};
+      let changed = false;
+
+      Object.entries(previous).forEach(([id, value]) => {
+        if (visibleIds.has(id)) {
+          cleaned[id] = value;
+        } else {
+          changed = true;
+        }
+      });
+
+      return changed ? cleaned : previous;
+    });
+  }, [visibleQuestionIds]);
+
+  // Only pages containing visible questions are shown to respondents.
+  const availablePages = pages.filter((page) =>
+    visibleQuestions.some(
+      (question) => question.pageNumber === page.pageNumber
+    )
   );
 
-  setAnswers((previous) => {
-    const cleaned: Record<string, AnswerValue> = {};
-    let changed = false;
+  const respondentPages =
+    availablePages.length > 0 ? availablePages : pages.slice(0, 1);
 
-    Object.entries(previous).forEach(([id, value]) => {
-      if (visibleIds.has(id)) {
-        cleaned[id] = value;
-      } else {
-        changed = true;
+  const currentPage =
+    respondentPages.find(
+      (page) => page.pageNumber === currentPageNumber
+    ) ?? respondentPages[0];
+
+  const activePageNumber = currentPage?.pageNumber ?? 1;
+
+  const currentPageIndex = Math.max(
+    0,
+    respondentPages.findIndex(
+      (page) => page.pageNumber === activePageNumber
+    )
+  );
+
+  const currentPageQuestions = visibleQuestions.filter(
+    (question) => question.pageNumber === activePageNumber
+  );
+
+  const isFirstPage = currentPageIndex === 0;
+  const isLastPage =
+    currentPageIndex === respondentPages.length - 1;
+
+  const progress =
+    respondentPages.length > 0
+      ? ((currentPageIndex + 1) / respondentPages.length) * 100
+      : 100;
+
+  const handleNext = () => {
+    const newErrors = validateQuestions(
+      currentPageQuestions,
+      visibleAnswers
+    );
+
+    setErrors((previous) => ({
+      ...previous,
+      ...newErrors,
+    }));
+
+    if (Object.keys(newErrors).length > 0) {
+      return;
+    }
+
+    const nextPage = respondentPages[currentPageIndex + 1];
+
+    if (nextPage) {
+      setCurrentPageNumber(nextPage.pageNumber);
+    }
+  };
+
+  const handlePrevious = () => {
+    const previousPage = respondentPages[currentPageIndex - 1];
+
+    if (previousPage) {
+      setCurrentPageNumber(previousPage.pageNumber);
+    }
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const newErrors = validateQuestions(
+      visibleQuestions,
+      visibleAnswers
+    );
+
+    setErrors(newErrors);
+
+    if (Object.keys(newErrors).length > 0) {
+      const firstInvalidQuestion = visibleQuestions.find(
+        (question) => newErrors[question.id]
+      );
+
+      if (firstInvalidQuestion) {
+        setCurrentPageNumber(firstInvalidQuestion.pageNumber);
       }
+
+      return;
+    }
+
+    submitMutation.mutate({
+      slug,
+      answers: visibleAnswers,
     });
-
-    return changed ? cleaned : previous;
-  });
-
-  setErrors((previous) => {
-    const cleaned: Record<string, string> = {};
-    let changed = false;
-
-    Object.entries(previous).forEach(([id, value]) => {
-      if (visibleIds.has(id)) {
-        cleaned[id] = value;
-      } else {
-        changed = true;
-      }
-    });
-
-    return changed ? cleaned : previous;
-  });
-}, [questions, answers, visibleQuestions]);
+  };
 
   if (formQuery.isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#EBE2CC]">
-        <p className="text-sm text-[#514D45]">Loading your form...</p>
+        <p className="text-sm text-[#514D45]">
+          Loading your form...
+        </p>
       </main>
     );
   }
@@ -162,77 +337,6 @@ useEffect(() => {
   }
 
   const form = formQuery.data.form;
-
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const newErrors: Record<string, string> = {};
-
-    // Validate only questions currently visible to the respondent.
-    visibleQuestions.forEach((question) => {
-      const answer = visibleAnswers[question.id];
-      const config = question.config as QuestionConfig | null;
-
-      if (question.required) {
-        const isEmpty =
-          answer === undefined ||
-          answer === "" ||
-          (Array.isArray(answer) && answer.length === 0);
-
-        if (isEmpty) {
-          newErrors[question.id] = "This question is required.";
-        }
-      }
-
-      if (
-        question.type === "email" &&
-        typeof answer === "string" &&
-        answer.trim() &&
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)
-      ) {
-        newErrors[question.id] = "Please enter a valid email address.";
-      }
-
-      if (
-        question.type === "number" &&
-        typeof answer === "string" &&
-        answer.trim() &&
-        !Number.isFinite(Number(answer))
-      ) {
-        newErrors[question.id] = "Please enter a valid number.";
-      }
-
-      if (
-        (question.type === "number" || question.type === "rating") &&
-        typeof answer === "number" &&
-        config?.min !== undefined &&
-        answer < config.min
-      ) {
-        newErrors[question.id] = `Minimum value is ${config.min}.`;
-      }
-
-      if (
-        (question.type === "number" || question.type === "rating") &&
-        answer !== undefined &&
-        config?.max !== undefined &&
-        Number(answer) > config.max
-      ) {
-        newErrors[question.id] = `Maximum value is ${config.max}.`;
-      }
-    });
-
-    setErrors(newErrors);
-
-    if (Object.keys(newErrors).length > 0) {
-      return;
-    }
-
-    // Submit only currently visible answers.
-    submitMutation.mutate({
-      slug,
-      answers: visibleAnswers,
-    });
-  };
 
   if (submitted) {
     return (
@@ -268,8 +372,36 @@ useEffect(() => {
             )}
           </div>
 
+          {/* Page progress */}
+          {respondentPages.length > 1 && (
+            <div className="mb-8">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-[#514D45]">
+                  {currentPage?.title ?? `Page ${currentPageIndex + 1}`}
+                </span>
+
+                <span className="text-xs text-[#777267]">
+                  Page {currentPageIndex + 1} of {respondentPages.length}
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-[#EBE2CC]">
+                <div
+                  className="h-full rounded-full bg-[#81765F] transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+
+              {currentPage?.description && (
+                <p className="mt-3 text-sm text-[#777267]">
+                  {currentPage.description}
+                </p>
+              )}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-8">
-            {visibleQuestions.map((question, index) => {
+            {currentPageQuestions.map((question, index) => {
               const config = question.config as QuestionConfig | null;
 
               return (
@@ -428,13 +560,38 @@ useEffect(() => {
               </p>
             )}
 
-            <button
-              type="submit"
-              disabled={submitMutation.isPending}
-              className="w-full rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {submitMutation.isPending ? "Submitting..." : "Submit Form"}
-            </button>
+            {/* Page navigation */}
+            <div className="flex items-center gap-3 pt-4">
+              {!isFirstPage && (
+                <button
+                  type="button"
+                  onClick={handlePrevious}
+                  className="rounded-lg border border-[#DED6C1] px-6 py-4 text-sm font-semibold text-[#514D45] transition hover:bg-[#EBE2CC]"
+                >
+                  Previous
+                </button>
+              )}
+
+              {!isLastPage ? (
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  className="flex-1 rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45]"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitMutation.isPending}
+                  className="flex-1 rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submitMutation.isPending
+                    ? "Submitting..."
+                    : "Submit Form"}
+                </button>
+              )}
+            </div>
           </form>
         </div>
 

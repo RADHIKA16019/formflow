@@ -7,8 +7,11 @@ import {
   timestamp,
   integer,
   uuid,
+  varchar,
   jsonb,
 } from "drizzle-orm/pg-core";
+
+import { uniqueIndex } from "drizzle-orm/pg-core";
 
 import {
   user,
@@ -64,17 +67,56 @@ export const forms = pgTable("forms", {
 // Questions table
 export const questions = pgTable("questions", {
   id: uuid("id").defaultRandom().primaryKey(),
+
   formId: uuid("form_id")
     .notNull()
     .references(() => forms.id, { onDelete: "cascade" }),
+
   title: text("title").notNull(),
   description: text("description"),
+
   type: questionTypeEnum("type").notNull(),
+
   required: boolean("required").default(false).notNull(),
+
   position: integer("position").notNull(),
+
+  // Multi-page form support
+  pageNumber: integer("page_number").default(1).notNull(),
+
   config: jsonb("config").default({}).notNull(),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const formPages = pgTable(
+  "form_pages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    formId: uuid("form_id")
+      .notNull()
+      .references(() => forms.id, { onDelete: "cascade" }),
+
+    pageNumber: integer("page_number").notNull(),
+
+    title: varchar("title", { length: 200 })
+      .notNull()
+      .default("Untitled Page"),
+
+    description: varchar("description", { length: 500 }),
+
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("form_pages_form_page_unique").on(
+      table.formId,
+      table.pageNumber
+    ),
+  ]
+);
 
 // Responses table
 export const responses = pgTable("responses", {
