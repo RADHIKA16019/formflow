@@ -521,7 +521,7 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
           'YYYY-MM-DD'
         )
       `,
-      total: count(responses.id),
+      responses: count(responses.id),
     })
     .from(responses)
     .innerJoin(forms, eq(responses.formId, forms.id))

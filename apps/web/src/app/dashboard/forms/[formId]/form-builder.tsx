@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
 import FormLimitsSettings from "@/components/form-limits-settings";
+import FormThemeSettings, {
+  type FormTheme,
+} from "@/components/form-theme-settings";  
+
 
 import {
   DndContext,
@@ -54,6 +58,15 @@ export default function FormBuilder() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [theme, setTheme] = useState<FormTheme>({
+  primaryColor: "#B7B09E",
+  secondaryColor: "#CFC6B1",
+  backgroundColor: "#EBE2CC",
+  fontFamily: "Inter",
+  buttonStyle: "rounded",
+  borderRadius: "medium",
+  backgroundStyle: "solid",
+});
   const [type, setType] = useState<QuestionType>("text");
   const [required, setRequired] = useState(false);
   const [options, setOptions] = useState(["Option 1", "Option 2"]);
@@ -275,7 +288,27 @@ useEffect(() => {
   const visibilityMutation = trpc.updateFormVisibility.useMutation({
     onSuccess: refreshForm,
   });
+useEffect(() => {
+  if (form?.theme) {
+    setTheme(form.theme as FormTheme);
+  }
+}, [form?.theme]);
+const updateThemeMutation = trpc.updateForm.useMutation({
+  onSuccess: async () => {
+    await refreshForm();
+  },
+});
 
+const saveTheme = () => {
+  if (!form) return;
+
+  updateThemeMutation.mutate({
+    formId,
+    title: form.title,
+    description: form.description ?? "",
+    theme,
+  });
+};
   function resetFields() {
     setTitle("");
     setDescription("");
@@ -724,6 +757,26 @@ const availableLogicQuestions = questionList.slice(
       )}
 
       <main className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
+        <div className="mb-8">
+  <FormThemeSettings
+    theme={theme}
+    onChange={setTheme}
+    onSave={saveTheme}
+    isSaving={updateThemeMutation.isPending}
+  />
+
+  {updateThemeMutation.isError && (
+    <p className="mt-2 text-sm text-red-600">
+      {updateThemeMutation.error.message}
+    </p>
+  )}
+
+  {updateThemeMutation.isSuccess && (
+    <p className="mt-2 text-sm text-green-600">
+      Theme saved successfully!
+    </p>
+  )}
+</div>
         {/* Form expiry and response limits */}
 <div className="mb-8">
   <FormLimitsSettings

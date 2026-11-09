@@ -447,6 +447,12 @@ const deleteFormMutation = trpc.deleteForm.useMutation({
                     <div className="flex flex-wrap items-center gap-2">
 
                       <Link
+  href={`/dashboard/forms/${form.id}`}
+  className="rounded-lg border border-[#DED6C1] px-4 py-2 text-sm font-semibold hover:bg-[#F8F6F0]"
+>
+  Edit
+</Link>
+                      <Link
                         href={`/dashboard/forms/${form.id}/responses`}
                         className="rounded-lg bg-[#302E29] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#49453D]"
                       >

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useParams } from "next/navigation";
@@ -126,7 +127,6 @@ function PublicFormContent() {
   const questions = formQuery.data?.questions ?? [];
   const pages = formQuery.data?.pages ?? [];
 
-  // Calculate conditional visibility across all pages.
   const visibleQuestions: typeof questions = [];
   const visibleAnswers: Record<string, AnswerValue> = {};
 
@@ -175,7 +175,6 @@ function PublicFormContent() {
     }
   });
 
-  // Remove answers belonging to questions that became hidden.
   const visibleQuestionIds = visibleQuestions
     .map((question) => question.id)
     .join("|");
@@ -216,7 +215,6 @@ function PublicFormContent() {
     });
   }, [visibleQuestionIds]);
 
-  // Only pages containing visible questions are shown to respondents.
   const availablePages = pages.filter((page) =>
     visibleQuestions.some(
       (question) => question.pageNumber === page.pageNumber
@@ -338,14 +336,77 @@ function PublicFormContent() {
 
   const form = formQuery.data.form;
 
+  const theme = form.theme ?? {
+    primaryColor: "#B7B09E",
+    secondaryColor: "#CFC6B1",
+    backgroundColor: "#EBE2CC",
+    fontFamily: "Inter",
+    buttonStyle: "rounded" as const,
+    borderRadius: "medium" as const,
+    backgroundStyle: "solid" as const,
+  };
+
+  const pageBackground =
+    theme.backgroundStyle === "gradient"
+      ? `linear-gradient(135deg, ${theme.backgroundColor}, ${theme.secondaryColor})`
+      : theme.backgroundColor;
+
+  const cardRadius =
+    theme.borderRadius === "small"
+      ? "6px"
+      : theme.borderRadius === "large"
+        ? "20px"
+        : "12px";
+
+  const buttonRadius =
+    theme.buttonStyle === "pill"
+      ? "9999px"
+      : theme.buttonStyle === "square"
+        ? "0px"
+        : "8px";
+
+  const inputStyle = {
+    borderColor: theme.secondaryColor,
+    borderRadius: cardRadius,
+    color: "#302E29",
+  };
+
+  const primaryButtonStyle = {
+    backgroundColor: theme.primaryColor,
+    borderRadius: buttonRadius,
+  };
+
+  const secondaryButtonStyle = {
+    borderColor: theme.secondaryColor,
+    borderRadius: buttonRadius,
+  };
+
   if (submitted) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#EBE2CC] px-5">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-10 text-center shadow-sm">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#EBE2CC] text-3xl">
+      <main
+        className="flex min-h-screen items-center justify-center px-5"
+        style={{
+          background: pageBackground,
+          fontFamily: theme.fontFamily,
+        }}
+      >
+        <div
+          className="w-full max-w-lg bg-white p-10 text-center shadow-sm"
+          style={{ borderRadius: cardRadius }}
+        >
+          <div
+            className="mx-auto flex h-16 w-16 items-center justify-center rounded-full text-3xl"
+            style={{
+              backgroundColor: theme.secondaryColor,
+              color: theme.primaryColor,
+            }}
+          >
             ✓
           </div>
-          <h1 className="mt-6 text-2xl font-bold text-[#302E29]">
+          <h1
+            className="mt-6 text-2xl font-bold"
+            style={{ color: theme.primaryColor }}
+          >
             Thank you!
           </h1>
           <p className="mt-3 text-sm text-[#777267]">
@@ -356,7 +417,6 @@ function PublicFormContent() {
     );
   }
 
-    // Handle expired forms and forms that reached their response limit.
   const availabilityStatus = formQuery.data.availabilityStatus;
 
   if (
@@ -366,13 +426,31 @@ function PublicFormContent() {
     const isExpired = availabilityStatus === "expired";
 
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#EBE2CC] px-5">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-10 text-center shadow-sm">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#EBE2CC] text-3xl">
+      <main
+        className="flex min-h-screen items-center justify-center px-5"
+        style={{
+          background: pageBackground,
+          fontFamily: theme.fontFamily,
+        }}
+      >
+        <div
+          className="w-full max-w-lg bg-white p-10 text-center shadow-sm"
+          style={{ borderRadius: cardRadius }}
+        >
+          <div
+            className="mx-auto flex h-16 w-16 items-center justify-center rounded-full text-3xl"
+            style={{
+              backgroundColor: theme.secondaryColor,
+              color: theme.primaryColor,
+            }}
+          >
             {isExpired ? "⌛" : "✓"}
           </div>
 
-          <h1 className="mt-6 text-2xl font-bold text-[#302E29]">
+          <h1
+            className="mt-6 text-2xl font-bold"
+            style={{ color: theme.primaryColor }}
+          >
             {isExpired ? "Form Expired" : "Response Limit Reached"}
           </h1>
 
@@ -391,11 +469,26 @@ function PublicFormContent() {
   }
 
   return (
-    <main className="min-h-screen bg-[#EBE2CC] px-4 py-12 sm:py-20">
+    <main
+      className="min-h-screen px-4 py-12 sm:py-20"
+      style={{
+        background: pageBackground,
+        fontFamily: theme.fontFamily,
+      }}
+    >
       <div className="mx-auto max-w-2xl">
-        <div className="rounded-2xl bg-white p-6 shadow-sm sm:p-10">
-          <div className="mb-8 border-b border-[#EAE6DC] pb-7">
-            <h1 className="text-3xl font-bold text-[#302E29]">
+        <div
+          className="bg-white p-6 shadow-sm sm:p-10"
+          style={{ borderRadius: cardRadius }}
+        >
+          <div
+            className="mb-8 border-b pb-7"
+            style={{ borderColor: theme.secondaryColor }}
+          >
+            <h1
+              className="text-3xl font-bold"
+              style={{ color: theme.primaryColor }}
+            >
               {form.title}
             </h1>
 
@@ -406,7 +499,6 @@ function PublicFormContent() {
             )}
           </div>
 
-          {/* Page progress */}
           {respondentPages.length > 1 && (
             <div className="mb-8">
               <div className="mb-3 flex items-center justify-between">
@@ -419,10 +511,16 @@ function PublicFormContent() {
                 </span>
               </div>
 
-              <div className="h-2 overflow-hidden rounded-full bg-[#EBE2CC]">
+              <div
+                className="h-2 overflow-hidden rounded-full"
+                style={{ backgroundColor: theme.secondaryColor }}
+              >
                 <div
-                  className="h-full rounded-full bg-[#81765F] transition-all duration-300"
-                  style={{ width: `${progress}%` }}
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${progress}%`,
+                    backgroundColor: theme.primaryColor,
+                  }}
                 />
               </div>
 
@@ -461,7 +559,8 @@ function PublicFormContent() {
                       }
                       rows={3}
                       placeholder="Type your answer..."
-                      className="w-full rounded-lg border border-[#DED6C1] p-3 text-sm outline-none focus:border-[#A69C84]"
+                      className="w-full border p-3 text-sm outline-none focus:ring-1"
+                      style={inputStyle}
                     />
                   )}
 
@@ -473,7 +572,8 @@ function PublicFormContent() {
                         updateAnswer(question.id, e.target.value)
                       }
                       placeholder="name@example.com"
-                      className="w-full rounded-lg border border-[#DED6C1] p-3 text-sm outline-none focus:border-[#A69C84]"
+                      className="w-full border p-3 text-sm outline-none focus:ring-1"
+                      style={inputStyle}
                     />
                   )}
 
@@ -487,7 +587,8 @@ function PublicFormContent() {
                       min={config?.min}
                       max={config?.max}
                       placeholder="Enter a number"
-                      className="w-full rounded-lg border border-[#DED6C1] p-3 text-sm outline-none focus:border-[#A69C84]"
+                      className="w-full border p-3 text-sm outline-none focus:ring-1"
+                      style={inputStyle}
                     />
                   )}
 
@@ -498,7 +599,8 @@ function PublicFormContent() {
                       onChange={(e) =>
                         updateAnswer(question.id, e.target.value)
                       }
-                      className="w-full rounded-lg border border-[#DED6C1] p-3 text-sm outline-none focus:border-[#A69C84]"
+                      className="w-full border p-3 text-sm outline-none focus:ring-1"
+                      style={inputStyle}
                     />
                   )}
 
@@ -508,7 +610,8 @@ function PublicFormContent() {
                       onChange={(e) =>
                         updateAnswer(question.id, e.target.value)
                       }
-                      className="w-full rounded-lg border border-[#DED6C1] bg-white p-3 text-sm outline-none focus:border-[#A69C84]"
+                      className="w-full border bg-white p-3 text-sm outline-none focus:ring-1"
+                      style={inputStyle}
                     >
                       <option value="">Choose an option</option>
 
@@ -545,7 +648,8 @@ function PublicFormContent() {
                                       )
                                 );
                               }}
-                              className="h-4 w-4 accent-[#81765F]"
+                              className="h-4 w-4"
+                              style={{ accentColor: theme.primaryColor }}
                             />
                             {option}
                           </label>
@@ -556,20 +660,28 @@ function PublicFormContent() {
 
                   {question.type === "rating" && (
                     <div className="flex flex-wrap gap-3">
-                      {[1, 2, 3, 4, 5].map((rating) => (
-                        <button
-                          key={rating}
-                          type="button"
-                          onClick={() => updateAnswer(question.id, rating)}
-                          className={`h-11 w-11 rounded-lg border text-sm font-semibold ${
-                            answers[question.id] === rating
-                              ? "border-[#81765F] bg-[#81765F] text-white"
-                              : "border-[#DED6C1] text-[#514D45] hover:bg-[#EBE2CC]"
-                          }`}
-                        >
-                          {rating}
-                        </button>
-                      ))}
+                      {[1, 2, 3, 4, 5].map((rating) => {
+                        const selected = answers[question.id] === rating;
+
+                        return (
+                          <button
+                            key={rating}
+                            type="button"
+                            onClick={() => updateAnswer(question.id, rating)}
+                            className="h-11 w-11 border text-sm font-semibold"
+                            style={{
+                              borderRadius: buttonRadius,
+                              borderColor: theme.primaryColor,
+                              backgroundColor: selected
+                                ? theme.primaryColor
+                                : "white",
+                              color: selected ? "white" : "#514D45",
+                            }}
+                          >
+                            {rating}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -594,13 +706,13 @@ function PublicFormContent() {
               </p>
             )}
 
-            {/* Page navigation */}
             <div className="flex items-center gap-3 pt-4">
               {!isFirstPage && (
                 <button
                   type="button"
                   onClick={handlePrevious}
-                  className="rounded-lg border border-[#DED6C1] px-6 py-4 text-sm font-semibold text-[#514D45] transition hover:bg-[#EBE2CC]"
+                  className="border px-6 py-4 text-sm font-semibold text-[#514D45] transition"
+                  style={secondaryButtonStyle}
                 >
                   Previous
                 </button>
@@ -610,7 +722,8 @@ function PublicFormContent() {
                 <button
                   type="button"
                   onClick={handleNext}
-                  className="flex-1 rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45]"
+                  className="flex-1 px-6 py-4 text-sm font-semibold text-white transition"
+                  style={primaryButtonStyle}
                 >
                   Next
                 </button>
@@ -618,7 +731,8 @@ function PublicFormContent() {
                 <button
                   type="submit"
                   disabled={submitMutation.isPending}
-                  className="flex-1 rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 px-6 py-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                  style={primaryButtonStyle}
                 >
                   {submitMutation.isPending
                     ? "Submitting..."
