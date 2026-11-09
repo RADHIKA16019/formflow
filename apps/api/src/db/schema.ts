@@ -49,25 +49,38 @@ export const questionTypeEnum = pgEnum("question_type", [
 
 
 // Forms table
+
 export const forms = pgTable("forms", {
   id: uuid("id").defaultRandom().primaryKey(),
+
   ownerId: text("owner_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+
   title: text("title").notNull(),
   description: text("description"),
   slug: text("slug").unique(),
+
   status: formStatusEnum("status").default("draft").notNull(),
   visibility: formVisibilityEnum("visibility").default("unlisted").notNull(),
-  publishedAt: timestamp("published_at"),
-  expiresAt: timestamp("expires_at", {
-  withTimezone: true,
-}),
 
-responseLimit: integer("response_limit"),
+  publishedAt: timestamp("published_at"),
+
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+  }),
+
+  responseLimit: integer("response_limit"),
+
+  // Archive support
+  archivedAt: timestamp("archived_at", {
+    withTimezone: true,
+  }),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
 
 // Questions table
 export const questions = pgTable("questions", {

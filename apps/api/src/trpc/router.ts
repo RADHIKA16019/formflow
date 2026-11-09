@@ -36,6 +36,44 @@ const protectedProcedure = t.procedure.use(({ ctx, next }) => {
   });
 });
 
+
+function remapQuestionConfig(
+  config: unknown,
+  questionIdMap: Map<string, string>
+): unknown {
+  if (
+    !config ||
+    typeof config !== "object" ||
+    Array.isArray(config)
+  ) {
+    return config;
+  }
+
+  const copied = { ...(config as Record<string, unknown>) };
+
+  const logic = copied.logic;
+
+  if (
+    logic &&
+    typeof logic === "object" &&
+    !Array.isArray(logic)
+  ) {
+    const logicConfig = logic as Record<string, unknown>;
+
+    if (typeof logicConfig.questionId === "string") {
+      copied.logic = {
+        ...logicConfig,
+        questionId:
+          questionIdMap.get(logicConfig.questionId) ??
+          logicConfig.questionId,
+      };
+    }
+  }
+
+  return copied;
+}
+
+
 // --------------------------------------------------
 // VALIDATION SCHEMAS
 // --------------------------------------------------
@@ -187,6 +225,205 @@ async function generateUniqueSlug(title: string) {
 // --------------------------------------------------
 
 export const appRouter = t.router({
+
+  
+  // -----------------------------------------
+  // CLONE FORM
+  // -----------------------------------------
+
+  cloneForm: protectedProcedure
+    .input(z.object({ formId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const ownerId = ctx.session.user.id;
+
+      return db.transaction(async (tx) => {
+        const [original] = await tx
+          .select()
+          .from(forms)
+          .where(
+            and(
+              eq(forms.id, input.formId),
+              eq(forms.ownerId, ownerId)
+            )
+          )
+          .limit(1);
+
+        if (!original) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Form not found.",
+          });
+        }
+
+        const originalPages = await tx
+          .select()
+          .from(formPages)
+          .where(eq(formPages.formId, original.id))
+          .orderBy(asc(formPages.pageNumber));
+
+        const originalQuestions = await tx
+          .select()
+          .from(questions)
+          .where(eq(questions.formId, original.id))
+          .orderBy(asc(questions.position));
+
+        const [clonedForm] = await tx
+          .insert(forms)
+          .values({
+            ownerId,
+            title: `${original.title} (Copy)`,
+            description: original.description,
+            slug: null,
+            status: "draft",
+            visibility: original.visibility,
+            publishedAt: null,
+            expiresAt: original.expiresAt,
+            responseLimit: original.responseLimit,
+            archivedAt: null,
+            updatedAt: new Date(),
+          })
+          .returning();
+
+        if (originalPages.length > 0) {
+          await tx.insert(formPages).values(
+            originalPages.map((page) => ({
+              formId: clonedForm.id,
+              pageNumber: page.pageNumber,
+              title: page.title,
+              description: page.description,
+            }))
+          );
+        }
+
+        const questionIdMap = new Map<string, string>();
+
+        originalQuestions.forEach((question) => {
+          questionIdMap.set(question.id, randomUUID());
+        });
+
+        if (originalQuestions.length > 0) {
+          await tx.insert(questions).values(
+            originalQuestions.map((question) => ({
+              id: questionIdMap.get(question.id)!,
+              formId: clonedForm.id,
+              title: question.title,
+              description: question.description,
+              type: question.type,
+              required: question.required,
+              position: question.position,
+              pageNumber: question.pageNumber,
+              config: remapQuestionConfig(
+                question.config,
+                questionIdMap
+              ),
+            }))
+          );
+        }
+
+        return clonedForm;
+      });
+    }),
+
+  // -----------------------------------------
+  // ARCHIVE FORM
+  // -----------------------------------------
+
+  archiveForm: protectedProcedure
+    .input(z.object({ formId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [archived] = await db
+        .update(forms)
+        .set({
+          archivedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .returning();
+
+      if (!archived) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Form not found.",
+        });
+      }
+
+      return {
+        success: true,
+        form: archived,
+      };
+    }),
+
+  // -----------------------------------------
+  // RESTORE FORM
+  // -----------------------------------------
+
+  restoreForm: protectedProcedure
+    .input(z.object({ formId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [restored] = await db
+        .update(forms)
+        .set({
+          archivedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(forms.id, input.formId),
+            eq(forms.ownerId, ctx.session.user.id)
+          )
+        )
+        .returning();
+
+      if (!restored) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Form not found.",
+        });
+      }
+
+      return {
+        success: true,
+        form: restored,
+      };
+    }),
+
+  // -----------------------------------------
+  // PERMANENTLY DELETE FORM
+  // -----------------------------------------
+
+  // deleteForm: protectedProcedure
+  //   .input(z.object({ formId: z.string().uuid() }))
+  //   .mutation(async ({ ctx, input }) => {
+  //     const [deleted] = await db
+  //       .delete(forms)
+  //       .where(
+  //         and(
+  //           eq(forms.id, input.formId),
+  //           eq(forms.ownerId, ctx.session.user.id)
+  //         )
+  //       )
+  //       .returning({
+  //         id: forms.id,
+  //       });
+
+  //     if (!deleted) {
+  //       throw new TRPCError({
+  //         code: "NOT_FOUND",
+  //         message: "Form not found.",
+  //       });
+  //     }
+
+  //     return {
+  //       success: true,
+  //       id: deleted.id,
+  //     };
+  //   }),
+
 
   // ----------------------------------------------
   // GENERAL
