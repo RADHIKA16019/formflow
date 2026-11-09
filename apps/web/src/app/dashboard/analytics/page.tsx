@@ -1,14 +1,27 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { trpc } from "../../../utils/trpc";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 export default function AnalyticsPage() {
-  const formsQuery = trpc.getMyForms.useQuery();
-  const analyticsQuery = trpc.getResponseAnalytics.useQuery();
+  const [selectedDays, setSelectedDays] = useState<"7" | "30" | "90">("30");
 
+const formsQuery = trpc.getMyForms.useQuery();
+
+const analyticsQuery = trpc.getResponseAnalytics.useQuery({
+  days: selectedDays,
+});
   const forms = formsQuery.data ?? [];
   const analytics = analyticsQuery.data ?? [];
 
@@ -121,16 +134,40 @@ export default function AnalyticsPage() {
             </div>
 
             <section className="rounded-2xl border border-[#EDE3D8] bg-white p-6 shadow-sm md:p-8">
-              <div className="mb-8">
-                <h2 className="text-xl font-bold text-[#30251F]">
-                  Response Trends
-                </h2>
-                <p className="mt-1 text-sm text-[#82766D]">
-                  Daily response activity across all your forms.
-                </p>
-              </div>
+             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+  <div>
+    <h2 className="text-xl font-bold text-[#30251F]">
+      Response Trends
+    </h2>
+    <p className="mt-1 text-sm text-[#82766D]">
+      Daily response activity across all your forms.
+    </p>
+  </div>
 
-              {analytics.length === 0 ? (
+  <div className="flex rounded-xl border border-[#EDE3D8] bg-[#FAF8F5] p-1">
+    {(["7", "30", "90"] as const).map((days) => (
+      <button
+        key={days}
+        onClick={() => setSelectedDays(days)}
+        className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+          selectedDays === days
+            ? "bg-[#A47755] text-white shadow-sm"
+            : "text-[#82766D] hover:text-[#30251F]"
+        }`}
+      >
+        {days} Days
+      </button>
+    ))}
+  </div>
+</div>
+
+              {analyticsQuery.isFetching ? (
+  <div className="rounded-xl bg-[#FAF8F5] px-5 py-12 text-center">
+    <p className="text-sm font-medium text-[#82766D]">
+      Updating response trends...
+    </p>
+  </div>
+) : analytics.length === 0 ?  (
                 <div className="rounded-xl bg-[#FAF8F5] px-5 py-12 text-center">
                   <p className="text-3xl">📈</p>
                   <p className="mt-3 font-semibold text-[#594333]">
@@ -143,30 +180,98 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {analytics.map((item) => {
-                    const count = Number(item.responses);
-                    const width = (count / maxResponses) * 100;
+  <div className="h-[320px] w-full">
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart
+        data={analytics}
+        margin={{ top: 10, right: 15, left: -20, bottom: 5 }}
+      >
+        <defs>
+          <linearGradient
+            id="responseGradient"
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+          >
+            <stop
+              offset="0%"
+              stopColor="#B9825B"
+              stopOpacity={0.35}
+            />
+            <stop
+              offset="95%"
+              stopColor="#B9825B"
+              stopOpacity={0.02}
+            />
+          </linearGradient>
+        </defs>
 
-                    return (
-                      <div key={item.date}>
-                        <div className="mb-2 flex items-center justify-between gap-4">
-                          <span className="text-sm font-medium text-[#594333]">
-                            {item.date}
-                          </span>
-                          <span className="text-sm font-bold text-[#30251F]">
-                            {count} responses
-                          </span>
-                        </div>
+        <CartesianGrid
+          strokeDasharray="3 3"
+          vertical={false}
+          stroke="#EDE3D8"
+        />
 
-                        <div className="h-3 overflow-hidden rounded-full bg-[#F1EBE4]">
-                          <div
-                            className="h-full rounded-full bg-[#B9825B] transition-all"
-                            style={{ width: `${width}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
+        <XAxis
+          dataKey="date"
+          tickFormatter={(value) =>
+            new Date(`${value}T00:00:00`).toLocaleDateString(
+              "en-IN",
+              { day: "2-digit", month: "short" }
+            )
+          }
+          tick={{ fill: "#82766D", fontSize: 12 }}
+          axisLine={false}
+          tickLine={false}
+        />
+
+        <YAxis
+          allowDecimals={false}
+          tick={{ fill: "#82766D", fontSize: 12 }}
+          axisLine={false}
+          tickLine={false}
+        />
+
+        <Tooltip
+          labelFormatter={(value) =>
+            new Date(`${value}T00:00:00`).toLocaleDateString(
+              "en-IN",
+              {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }
+            )
+          }
+          formatter={(value) => [
+            `${value} responses`,
+            "Responses",
+          ]}
+          contentStyle={{
+            borderRadius: "12px",
+            border: "1px solid #EDE3D8",
+            backgroundColor: "#FFFFFF",
+          }}
+        />
+
+        <Area
+          type="monotone"
+          dataKey="responses"
+          stroke="#B9825B"
+          strokeWidth={3}
+          fill="url(#responseGradient)"
+          activeDot={{
+            r: 6,
+            fill: "#A47755",
+            stroke: "#FFFFFF",
+            strokeWidth: 2,
+          }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  </div>
+)
                 </div>
               )}
             </section>
