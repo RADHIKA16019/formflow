@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { QRCodeCanvas } from "qrcode.react";
 import FormLimitsSettings from "@/components/form-limits-settings";
 import FormThemeSettings, {
   type FormTheme,
@@ -80,6 +81,11 @@ export default function FormBuilder() {
   const [logicValue, setLogicValue] = useState("");
 
   const [previewAnswers, setPreviewAnswers] = useState<PreviewAnswers>({});
+  const [shareOrigin, setShareOrigin] = useState("");
+
+useEffect(() => {
+  setShareOrigin(window.location.origin);
+}, []);
   const [previewPageNumber, setPreviewPageNumber] = useState(1);
 
   const [selectedPageNumber, setSelectedPageNumber] = useState(1);
@@ -587,6 +593,21 @@ const availableLogicQuestions = questionList.slice(
     }
   };
 
+  const handleDownloadQrCode = () => {
+  const canvas = document.querySelector<HTMLCanvasElement>(
+    "#form-qr-code canvas"
+  );
+
+  if (!canvas || !form?.slug) return;
+
+  const pngUrl = canvas.toDataURL("image/png");
+  const downloadLink = document.createElement("a");
+
+  downloadLink.href = pngUrl;
+  downloadLink.download = `${form.slug}-qr-code.png`;
+  downloadLink.click();
+};
+
   const openPreview = () => {
     setPreviewAnswers({});
     setPreviewPageNumber(
@@ -740,34 +761,82 @@ const availableLogicQuestions = questionList.slice(
       </header>
 
       {form.status === "published" && form.slug && (
-        <div className="border-b border-border bg-[#FAF9F6] px-6 py-4 sm:px-10">
-          <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold">Your form is live!</p>
-              <p className="mt-1 text-xs text-muted">
-                Share this link with respondents.
-              </p>
-              <p className="mt-2 break-all text-sm text-muted">
-                /forms/{form.slug}
-              </p>
-            </div>
+  <div className="border-b border-border bg-[#FAF9F6] px-6 py-6 sm:px-10">
+    <div className="mx-auto grid max-w-3xl gap-6 rounded-2xl border border-[#E8DFD4] bg-white p-6 shadow-sm md:grid-cols-[1fr_auto] md:items-center">
 
-            <button
-              type="button"
-              onClick={handleCopyShareLink}
-              className="shrink-0 rounded-lg border border-border bg-white px-4 py-2.5 text-sm font-semibold hover:bg-cream"
-            >
-              {isLinkCopied ? "Copied!" : "Copy Link"}
-            </button>
-          </div>
+      <div>
+        <p className="text-sm font-semibold text-green-700">
+          Your form is live!
+        </p>
 
-          {copyError && (
-            <p className="mx-auto mt-2 max-w-3xl text-xs text-red-600">
-              {copyError}
-            </p>
-          )}
+        <h2 className="mt-2 text-xl font-bold text-[#30251F]">
+          Share Your Form
+        </h2>
+
+        <p className="mt-2 text-sm text-[#82766D]">
+          Share this link or let respondents scan your QR code.
+        </p>
+
+        <p className="mt-4 break-all rounded-lg bg-[#F8F6F0] p-3 text-sm text-[#594333]">
+          {shareOrigin
+            ? `${shareOrigin}/forms/${form.slug}`
+            : `/forms/${form.slug}`}
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="rounded-lg border border-[#DED6C1] px-4 py-2.5 text-sm font-semibold text-[#302E29] transition hover:bg-cream"
+          >
+            {isLinkCopied ? "Copied!" : "Copy Link"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadQrCode}
+            disabled={!shareOrigin}
+            className="rounded-lg bg-[#A47755] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#896342] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Download QR Code
+          </button>
         </div>
-      )}
+
+        {copyError && (
+          <p className="mt-2 text-xs text-red-600">
+            {copyError}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-col items-center rounded-xl bg-[#F8F6F0] p-5">
+        <p className="mb-3 text-sm font-semibold text-[#594333]">
+          Scan to Open Form
+        </p>
+
+        {shareOrigin ? (
+          <div id="form-qr-code" className="rounded-lg bg-white p-3">
+            <QRCodeCanvas
+              value={`${shareOrigin}/forms/${form.slug}`}
+              size={180}
+              level="H"
+              includeMargin
+            />
+          </div>
+        ) : (
+          <div className="flex h-[204px] w-[204px] items-center justify-center text-sm text-[#82766D]">
+            Generating QR...
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-[#82766D]">
+          Scan using your phone camera
+        </p>
+      </div>
+
+    </div>
+  </div>
+)}
 
       {(publishMutation.isError ||
         unpublishMutation.isError ||
