@@ -346,7 +346,9 @@ export default function Home() {
             <a href="#features" className="hover:text-[#302e29]">Features</a>
             <a href="#how-it-works" className="hover:text-[#302e29]">How it works</a>
             <Link href="/explore" className="hover:text-[#302e29]">Explore</Link>
-            <a href="#pricing" className="hover:text-[#302e29]">Pricing</a>
+            <Link href="/pricing" className="hover:text-[#302e29]">
+  Pricing
+</Link>
           </div>
 
           <div className="flex items-center gap-3">
@@ -618,8 +620,14 @@ export default function Home() {
             we're working towards the right plan for every creator.
           </p>
           <p className="mt-4 text-xs text-[#a18d68]">
-            Pricing plans coming soon.
-          </p>
+  Plans starting at ₹0/month. Choose the right plan for you.
+</p>
+<Link
+  href="/pricing"
+  className="mt-7 inline-flex rounded-full bg-[#302e29] px-7 py-3.5 text-xs font-semibold text-white transition hover:bg-[#51483e]"
+>
+  Explore All Plans →
+</Link>
           <Link
             href="/signup"
             className="mt-7 inline-flex rounded-full bg-[#302e29] px-7 py-3.5 text-xs font-semibold text-white transition hover:bg-[#51483e]"
