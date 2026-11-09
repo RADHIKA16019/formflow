@@ -202,3 +202,85 @@ export const notifications = pgTable(
     ),
   ]
 );
+
+// Subscription plans
+export const subscriptionPlanEnum = pgEnum("subscription_plan", [
+  "free",
+  "pro",
+  "business",
+]);
+
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "active",
+  "cancelled",
+  "expired",
+]);
+
+// User subscriptions
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" })
+      .unique(),
+
+    plan: subscriptionPlanEnum("plan")
+      .default("free")
+      .notNull(),
+
+    status: subscriptionStatusEnum("status")
+      .default("active")
+      .notNull(),
+
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+
+    currentPeriodEnd: timestamp("current_period_end", {
+      withTimezone: true,
+    }),
+
+    paymentProvider: varchar("payment_provider", { length: 50 }),
+
+    paymentReference: text("payment_reference"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
+);
+
+// Monthly usage tracking
+export const subscriptionUsage = pgTable(
+  "subscription_usage",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+
+    periodStart: timestamp("period_start", {
+      withTimezone: true,
+    }).notNull(),
+
+    formsCreated: integer("forms_created").default(0).notNull(),
+
+    responsesReceived: integer("responses_received").default(0).notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("subscription_usage_period_unique").on(
+      table.subscriptionId,
+      table.periodStart
+    ),
+  ]
+);

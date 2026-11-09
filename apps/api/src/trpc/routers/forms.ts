@@ -1,11 +1,17 @@
 
 import { TRPCError } from "@trpc/server";
-import { and, eq, desc, asc } from "drizzle-orm";
+import { and, eq, desc, asc, count, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { forms, questions, formPages } from "../../db/schema.js";
+import {
+  forms,
+  questions,
+  formPages,
+  subscriptions,
+  subscriptionUsage,
+} from "../../db/schema.js";
 import { t, protectedProcedure } from "../trpc.js";
 
 // -----------------------------------------
@@ -78,6 +84,60 @@ function slugify(value: string) {
     .slice(0, 50);
 }
 
+const FREE_FORM_LIMIT = 3;
+const PRO_FORM_LIMIT = 20;
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function checkFormLimit(tx: DbTransaction, ownerId: string) {
+  // Ensure every user has a subscription.
+  await tx
+    .insert(subscriptions)
+    .values({ userId: ownerId })
+    .onConflictDoNothing();
+
+  // Lock subscription to prevent concurrent form creation bypassing limits.
+  const [subscription] = await tx
+    .select({
+      id: subscriptions.id,
+      plan: subscriptions.plan,
+      status: subscriptions.status,
+    })
+    .from(subscriptions)
+    .where(eq(subscriptions.userId, ownerId))
+    .for("update")
+    .limit(1);
+
+  if (!subscription) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Unable to load your subscription.",
+    });
+  }
+
+  const plan =
+    subscription.status === "active" ? subscription.plan : "free";
+
+  const maxForms =
+    plan === "business"
+      ? Infinity
+      : plan === "pro"
+        ? PRO_FORM_LIMIT
+        : FREE_FORM_LIMIT;
+
+  const [result] = await tx
+    .select({ total: count() })
+    .from(forms)
+    .where(eq(forms.ownerId, ownerId));
+
+  if (Number(result.total) >= maxForms) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `You have reached your ${maxForms} form limit. Upgrade your plan to create more forms.`,
+    });
+  }
+}
+
 async function generateUniqueSlug(title: string) {
   const baseSlug = slugify(title) || "form";
   const slug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
@@ -126,6 +186,7 @@ export const formsRouter = t.router({
             message: "Form not found.",
           });
         }
+        await checkFormLimit(tx, ownerId);
 
         const originalPages = await tx
           .select()
@@ -256,20 +317,25 @@ export const formsRouter = t.router({
 
   // CREATE FORM
 
-  createForm: protectedProcedure
-    .input(
-      z.object({
-        title: z.string().trim().min(1).max(100),
-        description: z.string().trim().max(500).optional(),
-        expiresAt: z.coerce.date().nullable().optional(),
-        responseLimit: z.number().int().positive().nullable().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [newForm] = await db
+   createForm: protectedProcedure
+  .input(
+    z.object({
+      title: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(500).optional(),
+      expiresAt: z.coerce.date().nullable().optional(),
+      responseLimit: z.number().int().positive().nullable().optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const ownerId = ctx.session.user.id;
+
+    const newForm = await db.transaction(async (tx) => {
+      await checkFormLimit(tx, ownerId);
+
+      const [created] = await tx
         .insert(forms)
         .values({
-          ownerId: ctx.session.user.id,
+          ownerId,
           title: input.title,
           description: input.description,
           expiresAt: input.expiresAt ?? null,
@@ -277,11 +343,14 @@ export const formsRouter = t.router({
         })
         .returning();
 
-      return {
-        message: "Form created successfully!",
-        form: newForm,
-      };
-    }),
+      return created;
+    });
+
+    return {
+      message: "Form created successfully!",
+      form: newForm,
+    };
+  }),
 
   // GET MY FORMS
 

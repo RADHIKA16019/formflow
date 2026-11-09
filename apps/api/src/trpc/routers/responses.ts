@@ -9,8 +9,16 @@ import {
   questions,
   responses,
   notifications,
+  subscriptions,
+  subscriptionUsage,
 } from "../../db/schema.js";
 import { protectedProcedure, publicProcedure, t } from "../trpc.js";
+
+const MONTHLY_RESPONSE_LIMITS = {
+  free: 100,
+  pro: 2000,
+  business: 10000,
+} as const;
 
 export const responsesRouter = t.router({
   getTotalResponses: protectedProcedure.query(async ({ ctx }) => {
@@ -274,70 +282,161 @@ export const responsesRouter = t.router({
         : null;
 
       await db.transaction(async (tx) => {
-        const [lockedForm] = await tx
-          .select({
-            id: forms.id,
-            status: forms.status,
-            expiresAt: forms.expiresAt,
-            responseLimit: forms.responseLimit,
-            ownerId: forms.ownerId,
-  title: forms.title,
-          })
-          .from(forms)
-          .where(eq(forms.id, form.id))
-          .for("update")
-          .limit(1);
+  const [lockedForm] = await tx
+    .select({
+      id: forms.id,
+      status: forms.status,
+      expiresAt: forms.expiresAt,
+      responseLimit: forms.responseLimit,
+      ownerId: forms.ownerId,
+      title: forms.title,
+    })
+    .from(forms)
+    .where(eq(forms.id, form.id))
+    .for("update")
+    .limit(1);
 
-        if (!lockedForm || lockedForm.status !== "published") {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "This form is no longer available.",
-          });
-        }
+  if (!lockedForm || lockedForm.status !== "published") {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "This form is no longer available.",
+    });
+  }
 
-        if (
-          lockedForm.expiresAt &&
-          lockedForm.expiresAt.getTime() <= Date.now()
-        ) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "This form has expired and is no longer accepting responses.",
-          });
-        }
+  if (
+    lockedForm.expiresAt &&
+    lockedForm.expiresAt.getTime() <= Date.now()
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This form has expired and is no longer accepting responses.",
+    });
+  }
 
-        const [currentCount] = await tx
-          .select({ total: count() })
-          .from(responses)
-          .where(eq(responses.formId, lockedForm.id));
+  // Ensure subscription exists.
+  await tx
+    .insert(subscriptions)
+    .values({ userId: lockedForm.ownerId })
+    .onConflictDoNothing();
 
-        if (
-          lockedForm.responseLimit !== null &&
-          Number(currentCount.total) >= lockedForm.responseLimit
-        ) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "This form has reached its maximum response limit.",
-          });
-        }
+  // Lock subscription to prevent concurrent submissions
+  // across multiple forms from exceeding the monthly limit.
+  const [subscription] = await tx
+    .select({
+      id: subscriptions.id,
+      plan: subscriptions.plan,
+      status: subscriptions.status,
+    })
+    .from(subscriptions)
+    .where(eq(subscriptions.userId, lockedForm.ownerId))
+    .for("update")
+    .limit(1);
 
-        const [newResponse] = await tx
-  .insert(responses)
-  .values({
+  if (!subscription) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Unable to load subscription.",
+    });
+  }
+
+  const plan =
+    subscription.status === "active"
+      ? subscription.plan
+      : "free";
+
+  const monthlyLimit = MONTHLY_RESPONSE_LIMITS[plan];
+
+  // UTC calendar month.
+  const now = new Date();
+  const periodStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+
+  // Create usage record if it does not exist.
+  await tx
+    .insert(subscriptionUsage)
+    .values({
+      subscriptionId: subscription.id,
+      periodStart,
+      formsCreated: 0,
+      responsesReceived: 0,
+    })
+    .onConflictDoNothing();
+
+  // Lock current month's usage.
+  const [usage] = await tx
+    .select({
+      id: subscriptionUsage.id,
+      responsesReceived: subscriptionUsage.responsesReceived,
+    })
+    .from(subscriptionUsage)
+    .where(
+      and(
+        eq(subscriptionUsage.subscriptionId, subscription.id),
+        eq(subscriptionUsage.periodStart, periodStart)
+      )
+    )
+    .for("update")
+    .limit(1);
+
+  if (!usage) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Unable to load monthly usage.",
+    });
+  }
+
+  if (usage.responsesReceived >= monthlyLimit) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `You have reached your monthly limit of ${monthlyLimit} responses. Upgrade your plan to receive more responses.`,
+    });
+  }
+
+  // Preserve existing per-form response limit.
+  const [currentCount] = await tx
+    .select({ total: count() })
+    .from(responses)
+    .where(eq(responses.formId, lockedForm.id));
+
+  if (
+    lockedForm.responseLimit !== null &&
+    Number(currentCount.total) >= lockedForm.responseLimit
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This form has reached its maximum response limit.",
+    });
+  }
+
+  const [newResponse] = await tx
+    .insert(responses)
+    .values({
+      formId: lockedForm.id,
+      respondentEmail:
+        typeof respondentEmail === "string" ? respondentEmail : null,
+      answers: input.answers,
+    })
+    .returning({ id: responses.id });
+
+  // Increment monthly usage atomically.
+  await tx
+    .update(subscriptionUsage)
+    .set({
+      responsesReceived: sql`${subscriptionUsage.responsesReceived} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptionUsage.id, usage.id));
+
+  // Preserve existing notification functionality.
+  await tx.insert(notifications).values({
+    userId: lockedForm.ownerId,
     formId: lockedForm.id,
-    respondentEmail:
-      typeof respondentEmail === "string" ? respondentEmail : null,
-    answers: input.answers,
-  })
-  .returning({ id: responses.id });
-
-await tx.insert(notifications).values({
-  userId: lockedForm.ownerId,
-  formId: lockedForm.id,
-  responseId: newResponse.id,
-  title: "New response received",
-  message: `Someone submitted a response to "${lockedForm.title}".`,
+    responseId: newResponse.id,
+    title: "New response received",
+    message: `Someone submitted a response to "${lockedForm.title}".`,
+  });
 });
-      });
 
       return {
         success: true,

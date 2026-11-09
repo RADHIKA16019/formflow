@@ -10,6 +10,7 @@ import { pagesRouter } from "./routers/pages.js";
 import { responsesRouter } from "./routers/responses.js";
 import { analyticsRouter } from "./routers/analytics.js";
 import { publicFormsRouter } from "./routers/public-forms.js";
+import { subscriptionsRouter } from "./routers/subscriptions.js";
 
 // General application procedures
 const generalRouter = t.router({
@@ -40,7 +41,8 @@ export const appRouter = t.mergeRouters(
   responsesRouter,
   analyticsRouter,
   publicFormsRouter,
-  notificationsRouter
+  notificationsRouter,
+  subscriptionsRouter
 );
 
 export type AppRouter = typeof appRouter;
