@@ -46,7 +46,15 @@ export const questionTypeEnum = pgEnum("question_type", [
   "date",
 ]);
 
-
+export type FormTheme = {
+  primaryColor: string;
+  secondaryColor: string;
+  backgroundColor: string;
+  fontFamily: string;
+  buttonStyle: "rounded" | "pill" | "square";
+  borderRadius: "small" | "medium" | "large";
+  backgroundStyle: "solid" | "gradient";
+};
 
 // Forms table
 
@@ -76,7 +84,18 @@ export const forms = pgTable("forms", {
   archivedAt: timestamp("archived_at", {
     withTimezone: true,
   }),
-
+  theme: jsonb("theme")
+  .$type<FormTheme>()
+  .notNull()
+  .default({
+    primaryColor: "#B7B09E",
+    secondaryColor: "#CFC6B1",
+    backgroundColor: "#EBE2CC",
+    fontFamily: "Inter",
+    buttonStyle: "rounded",
+    borderRadius: "medium",
+    backgroundStyle: "solid",
+  }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

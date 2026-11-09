@@ -1,0 +1,1 @@
+ALTER TABLE "forms" ADD COLUMN "theme" jsonb DEFAULT '{"primaryColor":"#B7B09E","secondaryColor":"#CFC6B1","backgroundColor":"#EBE2CC","fontFamily":"Inter","buttonStyle":"rounded","borderRadius":"medium","backgroundStyle":"solid"}'::jsonb NOT NULL;

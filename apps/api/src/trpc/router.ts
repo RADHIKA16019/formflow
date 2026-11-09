@@ -220,6 +220,16 @@ async function generateUniqueSlug(title: string) {
   return slug;
 }
 
+const formThemeSchema = z.object({
+  primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  secondaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  backgroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  fontFamily: z.string().min(1).max(80),
+  buttonStyle: z.enum(["rounded", "pill", "square"]),
+  borderRadius: z.enum(["small", "medium", "large"]),
+  backgroundStyle: z.enum(["solid", "gradient"]),
+});
+
 // --------------------------------------------------
 // APP ROUTER
 // --------------------------------------------------
@@ -605,6 +615,7 @@ updateForm: protectedProcedure
       description: z.string().trim().max(500).optional(),
       expiresAt: z.coerce.date().nullable().optional(),
       responseLimit: z.number().int().positive().nullable().optional(),
+      theme: formThemeSchema.optional(),
     })
   )
   .mutation(async ({ ctx, input }) => {
@@ -622,6 +633,10 @@ updateForm: protectedProcedure
         ...(input.responseLimit !== undefined
           ? { responseLimit: input.responseLimit }
           : {}),
+
+          ...(input.theme !== undefined
+  ? { theme: input.theme }
+  : {}),
       })
       .where(
         and(
@@ -905,6 +920,7 @@ updateForm: protectedProcedure
         publishedAt: forms.publishedAt,
         expiresAt: forms.expiresAt,
 responseLimit: forms.responseLimit,
+theme: forms.theme,
       })
       .from(forms)
       .where(

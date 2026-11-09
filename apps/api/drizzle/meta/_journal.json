@@ -43,6 +43,13 @@
       "when": 1794206911232,
       "tag": "0005_useful_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794208457293,
+      "tag": "0006_violet_wolverine",
+      "breakpoints": true
     }
   ]
 }
