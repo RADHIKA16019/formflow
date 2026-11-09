@@ -626,6 +626,27 @@ export default function FormBuilder() {
     (question) => question.pageNumber === previewPageNumber
   );
 
+  const previewPageIndex = visiblePreviewPages.findIndex(
+  (page) => page.pageNumber === previewPageNumber
+);
+
+const previewProgress =
+  previewPageIndex >= 0 && visiblePreviewPages.length > 0
+    ? ((previewPageIndex + 1) / visiblePreviewPages.length) * 100
+    : 0;
+
+useEffect(() => {
+  if (!isPreviewOpen || visiblePreviewPages.length === 0) return;
+
+  const currentPageIsVisible = visiblePreviewPages.some(
+    (page) => page.pageNumber === previewPageNumber
+  );
+
+  if (!currentPageIsVisible) {
+    setPreviewPageNumber(visiblePreviewPages[0].pageNumber);
+  }
+}, [isPreviewOpen, visiblePreviewPages, previewPageNumber]);
+
   const refreshQuestions = async () => {
     await utils.getQuestionsByForm.invalidate({ formId });
   };
@@ -719,13 +740,26 @@ export default function FormBuilder() {
     setIsModalOpen(false);
   }
 
-  const currentQuestionIndex = editingQuestionId
-    ? questionList.findIndex((question) => question.id === editingQuestionId)
-    : questionList.length;
+  const editingQuestionIndex = editingQuestionId
+  ? questionList.findIndex(
+      (question) => question.id === editingQuestionId
+    )
+  : -1;
 
-  const availableLogicQuestions = questionList.filter(
-    (_, index) => index < currentQuestionIndex
-  );
+const nextPageQuestionIndex = questionList.findIndex(
+  (question) => question.pageNumber > selectedPageNumber
+);
+
+const currentQuestionIndex = editingQuestionId
+  ? editingQuestionIndex
+  : nextPageQuestionIndex === -1
+    ? questionList.length
+    : nextPageQuestionIndex;
+
+const availableLogicQuestions = questionList.slice(
+  0,
+  Math.max(currentQuestionIndex, 0)
+);
 
   const selectedLogicQuestion = availableLogicQuestions.find(
     (question) => question.id === logicQuestionId
@@ -1822,7 +1856,7 @@ export default function FormBuilder() {
                   <div className="mb-6">
                     <div className="flex items-center justify-between text-xs text-muted">
                       <span>
-                        Page {previewPageNumber} of {pageList.length}
+                        Page {previewPageIndex + 1} of {visiblePreviewPages.length}
                       </span>
                       <span>
                         {currentPreviewPageQuestions.length} questions
@@ -1832,10 +1866,7 @@ export default function FormBuilder() {
                       <div
                         className="h-full rounded-full bg-[#8A7652] transition-all"
                         style={{
-                          width: `${
-                            (previewPageNumber / Math.max(pageList.length, 1)) *
-                            100
-                          }%`,
+                          width:  `${previewProgress}%`,
                         }}
                       />
                     </div>
@@ -1882,14 +1913,14 @@ export default function FormBuilder() {
                   <div className="mt-10 flex items-center justify-between border-t border-border pt-6">
                     <button
                       type="button"
-                      disabled={previewPageNumber === pageList[0]?.pageNumber}
+                      disabled={previewPageIndex <= 0}
                       onClick={() => {
-                        const previous = [...visiblePreviewPages]
-                          .reverse()
-                          .find((page) => page.pageNumber < previewPageNumber);
+  const previous = visiblePreviewPages[previewPageIndex - 1];
 
-                        if (previous) setPreviewPageNumber(previous.pageNumber);
-                      }}
+  if (previous) {
+    setPreviewPageNumber(previous.pageNumber);
+  }
+}}
                       className="rounded-lg border border-border px-5 py-3 text-sm font-semibold disabled:opacity-40"
                     >
                       ← Previous
@@ -1898,17 +1929,15 @@ export default function FormBuilder() {
                     <button
                       type="button"
                       disabled={
-                        previewPageNumber ===
-                        visiblePreviewPages[visiblePreviewPages.length - 1]
-                          ?.pageNumber
-                      }
+  previewPageIndex === visiblePreviewPages.length - 1
+}
                       onClick={() => {
-                        const next = visiblePreviewPages.find(
-                          (page) => page.pageNumber > previewPageNumber
-                        );
+  const next = visiblePreviewPages[previewPageIndex + 1];
 
-                        if (next) setPreviewPageNumber(next.pageNumber);
-                      }}
+  if (next) {
+    setPreviewPageNumber(next.pageNumber);
+  }
+}}
                       className="rounded-lg bg-[#CFC6B1] px-6 py-3 text-sm font-semibold text-[#302E29] disabled:opacity-40"
                     >
                       Next →
