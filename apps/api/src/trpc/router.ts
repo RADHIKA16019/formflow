@@ -579,6 +579,47 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
     return formResponses;
   }),
 
+  // ----------------------------------------------
+  // RESPONSES - DELETE
+  // ----------------------------------------------
+
+  deleteResponse: protectedProcedure
+    .input(
+      z.object({
+        responseId: z.string().uuid(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [deletedResponse] = await db
+        .delete(responses)
+        .where(
+          and(
+            eq(responses.id, input.responseId),
+            sql`EXISTS (
+              SELECT 1
+              FROM forms
+              WHERE forms.id = ${responses.formId}
+              AND forms.owner_id = ${ctx.session.user.id}
+            )`
+          )
+        )
+        .returning({
+          id: responses.id,
+        });
+
+      if (!deletedResponse) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Response not found or you don't have access to it.",
+        });
+      }
+
+      return {
+        success: true,
+        message: "Response deleted successfully!",
+      };
+    }),
+
   getFormById: protectedProcedure
     .input(formIdSchema)
     .query(async ({ ctx, input }) => {
