@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
 
 import {
@@ -63,6 +63,9 @@ type QuestionCardData = {
   config?: unknown;
 };
 
+type AnswerValue = string | number | string[];
+type PreviewAnswers = Record<string, AnswerValue>;
+
 function getConfig(value: unknown): QuestionConfig {
   if (!value || typeof value !== "object") return {};
   return value as QuestionConfig;
@@ -88,6 +91,105 @@ function getOperators(sourceType: QuestionType): {
     { label: "Equals", value: "equals" },
     { label: "Does not equal", value: "notEquals" },
   ];
+}
+
+// Evaluate conditional logic using an earlier question's answer.
+function matchesCondition(
+  sourceQuestion: QuestionCardData,
+  answer: AnswerValue | undefined,
+  logic: QuestionLogic
+): boolean {
+  // An unanswered question never matches, including notEquals.
+  if (
+    answer === undefined ||
+    answer === null ||
+    answer === "" ||
+    (Array.isArray(answer) && answer.length === 0)
+  ) {
+    return false;
+  }
+
+  if (sourceQuestion.type === "checkbox") {
+    if (logic.operator !== "contains") return false;
+
+    return Array.isArray(answer)
+      ? answer.includes(String(logic.value))
+      : String(answer).includes(String(logic.value));
+  }
+
+  if (
+    sourceQuestion.type === "number" ||
+    sourceQuestion.type === "rating"
+  ) {
+    const actual = Number(answer);
+    const expected = Number(logic.value);
+
+    if (!Number.isFinite(actual) || !Number.isFinite(expected)) {
+      return false;
+    }
+
+    if (logic.operator === "equals") return actual === expected;
+    if (logic.operator === "notEquals") return actual !== expected;
+
+    return false;
+  }
+
+  const actual = String(answer);
+  const expected = String(logic.value);
+
+  if (logic.operator === "equals") return actual === expected;
+  if (logic.operator === "notEquals") return actual !== expected;
+  if (logic.operator === "contains") return actual.includes(expected);
+
+  return false;
+}
+
+// Calculate which questions should currently be visible.
+function calculateVisibleQuestions(
+  questions: QuestionCardData[],
+  answers: PreviewAnswers
+): QuestionCardData[] {
+  const visibleQuestions: QuestionCardData[] = [];
+
+  for (const question of questions) {
+    const logic = getConfig(question.config).logic;
+
+    if (!logic) {
+      visibleQuestions.push(question);
+      continue;
+    }
+
+    const sourceQuestion = questions.find(
+      (item) => item.id === logic.questionId
+    );
+
+    if (!sourceQuestion) {
+      visibleQuestions.push(question);
+      continue;
+    }
+
+    // A hidden source question cannot provide an answer.
+    const sourceIsVisible = visibleQuestions.some(
+      (item) => item.id === logic.questionId
+    );
+
+    const matches = sourceIsVisible
+      ? matchesCondition(
+          sourceQuestion,
+          answers[logic.questionId],
+          logic
+        )
+      : false;
+
+    const shouldShow =
+      logic.action === "show" ? matches : !matches;
+
+    if (shouldShow) {
+      visibleQuestions.push(question);
+    }
+  }
+
+  return visibleQuestions;
 }
 
 // Sortable question card
@@ -233,15 +335,22 @@ function SortableQuestionCard({
   );
 }
 
-// Respondent-facing visual preview
+// Interactive respondent-facing preview question
 function QuestionPreview({
   question,
   index,
+  answer,
+  onChange,
 }: {
   question: QuestionCardData;
   index: number;
+  answer: AnswerValue | undefined;
+  onChange: (value: AnswerValue) => void;
 }) {
   const config = getConfig(question.config);
+
+  const inputClass =
+    "w-full rounded-lg border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-[#B7B09E]";
 
   return (
     <div className="space-y-3">
@@ -262,48 +371,56 @@ function QuestionPreview({
 
       {question.type === "text" && (
         <input
-          disabled
           type="text"
+          value={typeof answer === "string" ? answer : ""}
+          onChange={(e) => onChange(e.target.value)}
           placeholder="Type your answer..."
-          className="w-full rounded-lg border border-border bg-white px-4 py-3 text-sm"
+          className={inputClass}
         />
       )}
 
       {question.type === "email" && (
         <input
-          disabled
           type="email"
+          value={typeof answer === "string" ? answer : ""}
+          onChange={(e) => onChange(e.target.value)}
           placeholder="name@example.com"
-          className="w-full rounded-lg border border-border bg-white px-4 py-3 text-sm"
+          className={inputClass}
         />
       )}
 
       {question.type === "number" && (
         <input
-          disabled
           type="number"
+          min={config.min}
+          max={config.max}
+          value={
+            typeof answer === "string" || typeof answer === "number"
+              ? answer
+              : ""
+          }
+          onChange={(e) => onChange(e.target.value)}
           placeholder={`Enter a number (${config.min ?? "any"} – ${config.max ?? "any"})`}
-          className="w-full rounded-lg border border-border bg-white px-4 py-3 text-sm"
+          className={inputClass}
         />
       )}
 
       {question.type === "date" && (
         <input
-          disabled
           type="date"
-          className="w-full rounded-lg border border-border bg-white px-4 py-3 text-sm"
+          value={typeof answer === "string" ? answer : ""}
+          onChange={(e) => onChange(e.target.value)}
+          className={inputClass}
         />
       )}
 
       {question.type === "select" && (
         <select
-          disabled
-          defaultValue=""
-          className="w-full rounded-lg border border-border bg-white px-4 py-3 text-sm"
+          value={typeof answer === "string" ? answer : ""}
+          onChange={(e) => onChange(e.target.value)}
+          className={inputClass}
         >
-          <option value="" disabled>
-            Select an option
-          </option>
+          <option value="">Select an option</option>
 
           {config.options?.map((option, i) => (
             <option key={i} value={option}>
@@ -315,19 +432,36 @@ function QuestionPreview({
 
       {question.type === "checkbox" && (
         <div className="space-y-3">
-          {config.options?.map((option, i) => (
-            <label
-              key={i}
-              className="flex items-center gap-3 text-sm text-muted"
-            >
-              <input
-                disabled
-                type="checkbox"
-                className="size-4 accent-[#B7B09E]"
-              />
-              {option}
-            </label>
-          ))}
+          {config.options?.map((option, i) => {
+            const selected = Array.isArray(answer)
+              ? answer.includes(option)
+              : false;
+
+            return (
+              <label
+                key={i}
+                className="flex cursor-pointer items-center gap-3 text-sm text-foreground"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={(e) => {
+                    const current = Array.isArray(answer)
+                      ? answer
+                      : [];
+
+                    const updated = e.target.checked
+                      ? [...current, option]
+                      : current.filter((item) => item !== option);
+
+                    onChange(updated);
+                  }}
+                  className="size-4 accent-[#B7B09E]"
+                />
+                {option}
+              </label>
+            );
+          })}
         </div>
       )}
 
@@ -344,16 +478,24 @@ function QuestionPreview({
               ),
             },
             (_, i) => i + (config.min ?? 1)
-          ).map((value) => (
-            <button
-              type="button"
-              disabled
-              key={value}
-              className="flex size-10 items-center justify-center rounded-lg border border-border text-sm text-muted"
-            >
-              {value}
-            </button>
-          ))}
+          ).map((value) => {
+            const isSelected = Number(answer) === value;
+
+            return (
+              <button
+                type="button"
+                key={value}
+                onClick={() => onChange(value)}
+                className={`flex size-10 items-center justify-center rounded-lg border text-sm font-medium transition ${
+                  isSelected
+                    ? "border-[#8A7652] bg-[#DED6C1] text-[#302E29]"
+                    : "border-border bg-white text-muted hover:border-[#B7B09E] hover:bg-cream"
+                }`}
+              >
+                {value}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -381,13 +523,17 @@ export default function FormBuilder() {
   const [min, setMin] = useState("1");
   const [max, setMax] = useState("5");
 
-  // Conditional logic state
+  // Conditional logic editor state
   const [logicEnabled, setLogicEnabled] = useState(false);
   const [logicAction, setLogicAction] = useState<"show" | "hide">("show");
   const [logicQuestionId, setLogicQuestionId] = useState("");
   const [logicOperator, setLogicOperator] =
     useState<LogicOperator>("equals");
   const [logicValue, setLogicValue] = useState("");
+
+  // Interactive preview answers
+  const [previewAnswers, setPreviewAnswers] =
+    useState<PreviewAnswers>({});
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -411,6 +557,59 @@ export default function FormBuilder() {
   } = trpc.getQuestionsByForm.useQuery({ formId });
 
   const utils = trpc.useUtils();
+
+  // Calculate preview visibility from the current answers.
+  const questionList = questions ?? [];
+
+  const visiblePreviewQuestions = useMemo(
+    () =>
+      calculateVisibleQuestions(
+        questionList as QuestionCardData[],
+        previewAnswers
+      ),
+    [questionList, previewAnswers]
+  );
+
+const visibleQuestionIds = useMemo(
+  () => visiblePreviewQuestions.map((question) => question.id).join("|"),
+  [visiblePreviewQuestions]
+);
+
+// Clear answers only when the visible question list changes.
+useEffect(() => {
+  const visibleIds = new Set(
+    visibleQuestionIds ? visibleQuestionIds.split("|") : []
+  );
+
+  setPreviewAnswers((current) => {
+    const updated = { ...current };
+    let changed = false;
+
+    for (const questionId of Object.keys(updated)) {
+      if (!visibleIds.has(questionId)) {
+        delete updated[questionId];
+        changed = true;
+      }
+    }
+
+    return changed ? updated : current;
+  });
+}, [visibleQuestionIds]);
+
+  const handlePreviewAnswerChange = (
+    questionId: string,
+    value: AnswerValue
+  ) => {
+    setPreviewAnswers((current) => ({
+      ...current,
+      [questionId]: value,
+    }));
+  };
+
+  const openPreview = () => {
+    setPreviewAnswers({});
+    setIsPreviewOpen(true);
+  };
 
   const refreshQuestions = async () => {
     await utils.getQuestionsByForm.invalidate({ formId });
@@ -745,7 +944,6 @@ export default function FormBuilder() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          {/* Publishing controls */}
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={`rounded-full px-3 py-2 text-xs font-semibold ${
@@ -806,7 +1004,7 @@ export default function FormBuilder() {
 
           <button
             type="button"
-            onClick={() => setIsPreviewOpen(true)}
+            onClick={openPreview}
             className="rounded-lg border border-border px-5 py-3 text-sm font-semibold transition hover:bg-cream"
           >
             <span className="mr-2">◉</span>
@@ -1366,7 +1564,7 @@ export default function FormBuilder() {
         </div>
       )}
 
-      {/* Form Preview Modal */}
+      {/* Interactive Form Preview Modal */}
       {isPreviewOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/40 px-3 py-6 backdrop-blur-[2px] sm:px-6">
           <div className="my-auto w-full max-w-2xl overflow-hidden rounded-2xl bg-[#FAF9F6] shadow-2xl">
@@ -1412,13 +1610,23 @@ export default function FormBuilder() {
                     Add questions to see them in the preview.
                   </p>
                 </div>
+              ) : visiblePreviewQuestions.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#CFC6B1] p-8 text-center">
+                  <p className="text-sm text-muted">
+                    No questions are currently visible.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-8">
-                  {questions.map((question, index) => (
+                  {visiblePreviewQuestions.map((question, index) => (
                     <QuestionPreview
                       key={question.id}
                       question={question}
                       index={index}
+                      answer={previewAnswers[question.id]}
+                      onChange={(value) =>
+                        handlePreviewAnswerChange(question.id, value)
+                      }
                     />
                   ))}
                 </div>
@@ -1434,7 +1642,8 @@ export default function FormBuilder() {
                 </button>
 
                 <p className="mt-3 text-xs text-muted">
-                  This is a preview. Responses cannot be submitted yet.
+                  Interactive preview: enter answers to test conditional
+                  questions. Responses cannot be submitted or saved.
                 </p>
               </div>
             </div>

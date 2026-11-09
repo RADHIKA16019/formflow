@@ -2,11 +2,24 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { Suspense } from "react";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { trpc } from "../../../utils/trpc";
 
 type AnswerValue = string | number | string[];
+
+type QuestionLogic = {
+  action: "show" | "hide";
+  questionId: string;
+  operator: "equals" | "notEquals" | "contains";
+  value: string | number;
+};
+
+type QuestionConfig = {
+  options?: string[];
+  min?: number;
+  max?: number;
+  logic?: QuestionLogic;
+};
 
 function PublicFormContent() {
   const params = useParams<{ slug: string }>();
@@ -21,11 +34,11 @@ function PublicFormContent() {
     { enabled: Boolean(slug) }
   );
 
-    const submitMutation = trpc.submitPublicResponse.useMutation({
+  const submitMutation = trpc.submitPublicResponse.useMutation({
     onSuccess: () => {
-        setSubmitted(true);
+      setSubmitted(true);
     },
-    });
+  });
 
   const updateAnswer = (questionId: string, value: AnswerValue) => {
     setAnswers((previous) => ({
@@ -38,6 +51,92 @@ function PublicFormContent() {
       [questionId]: "",
     }));
   };
+
+const questions = formQuery.data?.questions ?? [];
+
+const visibleQuestions: typeof questions = [];
+const visibleAnswers: Record<string, AnswerValue> = {};
+
+questions.forEach((question) => {
+  const config = question.config as QuestionConfig | null;
+  const logic = config?.logic;
+
+  let isVisible = true;
+
+  if (logic) {
+    const sourceAnswer = visibleAnswers[logic.questionId];
+
+    let conditionMatches = false;
+
+    const hasSourceAnswer =
+      sourceAnswer !== undefined &&
+      sourceAnswer !== "" &&
+      (!Array.isArray(sourceAnswer) || sourceAnswer.length > 0);
+
+    if (hasSourceAnswer) {
+      if (logic.operator === "equals") {
+        conditionMatches = sourceAnswer === logic.value;
+      } else if (logic.operator === "notEquals") {
+        conditionMatches = sourceAnswer !== logic.value;
+      } else if (logic.operator === "contains") {
+        if (typeof sourceAnswer === "string") {
+          conditionMatches = sourceAnswer.includes(String(logic.value));
+        } else if (Array.isArray(sourceAnswer)) {
+          conditionMatches = sourceAnswer.includes(String(logic.value));
+        }
+      }
+    }
+
+    isVisible =
+      logic.action === "show"
+        ? conditionMatches
+        : !conditionMatches;
+  }
+
+  if (isVisible) {
+    visibleQuestions.push(question);
+
+    if (answers[question.id] !== undefined) {
+      visibleAnswers[question.id] = answers[question.id];
+    }
+  }
+});
+
+useEffect(() => {
+  const visibleIds = new Set(
+    visibleQuestions.map((question) => question.id)
+  );
+
+  setAnswers((previous) => {
+    const cleaned: Record<string, AnswerValue> = {};
+    let changed = false;
+
+    Object.entries(previous).forEach(([id, value]) => {
+      if (visibleIds.has(id)) {
+        cleaned[id] = value;
+      } else {
+        changed = true;
+      }
+    });
+
+    return changed ? cleaned : previous;
+  });
+
+  setErrors((previous) => {
+    const cleaned: Record<string, string> = {};
+    let changed = false;
+
+    Object.entries(previous).forEach(([id, value]) => {
+      if (visibleIds.has(id)) {
+        cleaned[id] = value;
+      } else {
+        changed = true;
+      }
+    });
+
+    return changed ? cleaned : previous;
+  });
+}, [questions, answers, visibleQuestions]);
 
   if (formQuery.isLoading) {
     return (
@@ -62,15 +161,17 @@ function PublicFormContent() {
     );
   }
 
-  const { form, questions } = formQuery.data;
+  const form = formQuery.data.form;
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const newErrors: Record<string, string> = {};
 
-    questions.forEach((question) => {
-      const answer = answers[question.id];
+    // Validate only questions currently visible to the respondent.
+    visibleQuestions.forEach((question) => {
+      const answer = visibleAnswers[question.id];
+      const config = question.config as QuestionConfig | null;
 
       if (question.required) {
         const isEmpty =
@@ -100,6 +201,24 @@ function PublicFormContent() {
       ) {
         newErrors[question.id] = "Please enter a valid number.";
       }
+
+      if (
+        (question.type === "number" || question.type === "rating") &&
+        typeof answer === "number" &&
+        config?.min !== undefined &&
+        answer < config.min
+      ) {
+        newErrors[question.id] = `Minimum value is ${config.min}.`;
+      }
+
+      if (
+        (question.type === "number" || question.type === "rating") &&
+        answer !== undefined &&
+        config?.max !== undefined &&
+        Number(answer) > config.max
+      ) {
+        newErrors[question.id] = `Maximum value is ${config.max}.`;
+      }
     });
 
     setErrors(newErrors);
@@ -108,9 +227,10 @@ function PublicFormContent() {
       return;
     }
 
+    // Submit only currently visible answers.
     submitMutation.mutate({
-    slug,
-    answers,
+      slug,
+      answers: visibleAnswers,
     });
   };
 
@@ -140,6 +260,7 @@ function PublicFormContent() {
             <h1 className="text-3xl font-bold text-[#302E29]">
               {form.title}
             </h1>
+
             {form.description && (
               <p className="mt-3 text-sm leading-6 text-[#777267]">
                 {form.description}
@@ -148,12 +269,8 @@ function PublicFormContent() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-8">
-            {questions.map((question, index) => {
-              const config = question.config as {
-                options?: string[];
-                min?: number;
-                max?: number;
-              } | null;
+            {visibleQuestions.map((question, index) => {
+              const config = question.config as QuestionConfig | null;
 
               return (
                 <div key={question.id}>
@@ -228,6 +345,7 @@ function PublicFormContent() {
                       className="w-full rounded-lg border border-[#DED6C1] bg-white p-3 text-sm outline-none focus:border-[#A69C84]"
                     >
                       <option value="">Choose an option</option>
+
                       {config?.options?.map((option) => (
                         <option key={option} value={option}>
                           {option}
@@ -256,7 +374,9 @@ function PublicFormContent() {
                                   question.id,
                                   e.target.checked
                                     ? [...selected, option]
-                                    : selected.filter((item) => item !== option)
+                                    : selected.filter(
+                                        (item) => item !== option
+                                      )
                                 );
                               }}
                               className="h-4 w-4 accent-[#81765F]"
@@ -296,25 +416,25 @@ function PublicFormContent() {
               );
             })}
 
-{submitMutation.isError && (
-  <p className="text-sm text-red-600">
-    {submitMutation.error.message}
-  </p>
-)}
+            {submitMutation.isError && (
+              <p className="text-sm text-red-600">
+                {submitMutation.error.message}
+              </p>
+            )}
 
-{submitMutation.isPending && (
-  <p className="text-sm text-[#777267]">
-    Submitting your response...
-  </p>
-)}
+            {submitMutation.isPending && (
+              <p className="text-sm text-[#777267]">
+                Submitting your response...
+              </p>
+            )}
 
             <button
-  type="submit"
-  disabled={submitMutation.isPending}
-  className="w-full rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:cursor-not-allowed disabled:opacity-50"
->
-  {submitMutation.isPending ? "Submitting..." : "Submit Form"}
-</button>
+              type="submit"
+              disabled={submitMutation.isPending}
+              className="w-full rounded-lg bg-[#302E29] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#514D45] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitMutation.isPending ? "Submitting..." : "Submit Form"}
+            </button>
           </form>
         </div>
 
