@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
-
+import FormLimitsSettings from "@/components/form-limits-settings";
 import {
   DndContext,
   closestCenter,
@@ -1171,6 +1171,16 @@ const availableLogicQuestions = questionList.slice(
       )}
 
       <main className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
+        {/* Form expiry and response limits */}
+<div className="mb-8">
+  <FormLimitsSettings
+    formId={formId}
+    title={form.title}
+    description={form.description}
+    expiresAt={form.expiresAt}
+    responseLimit={form.responseLimit}
+  />
+</div>
         <div className="mb-8">
           <h2 className="text-lg font-semibold">Form Structure</h2>
           <p className="mt-1 text-sm text-muted">

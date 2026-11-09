@@ -213,28 +213,32 @@ export const appRouter = t.router({
   // FORMS - CREATE
   // ----------------------------------------------
 
-  createForm: protectedProcedure
-    .input(
-      z.object({
-        title: z.string().trim().min(1).max(100),
-        description: z.string().trim().max(500).optional(),
+createForm: protectedProcedure
+  .input(
+    z.object({
+      title: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(500).optional(),
+      expiresAt: z.coerce.date().nullable().optional(),
+      responseLimit: z.number().int().positive().nullable().optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [newForm] = await db
+      .insert(forms)
+      .values({
+        ownerId: ctx.session.user.id,
+        title: input.title,
+        description: input.description,
+        expiresAt: input.expiresAt ?? null,
+        responseLimit: input.responseLimit ?? null,
       })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [newForm] = await db
-        .insert(forms)
-        .values({
-          ownerId: ctx.session.user.id,
-          title: input.title,
-          description: input.description,
-        })
-        .returning();
+      .returning();
 
-      return {
-        message: "Form created successfully!",
-        form: newForm,
-      };
-    }),
+    return {
+      message: "Form created successfully!",
+      form: newForm,
+    };
+  }),
 
   // ----------------------------------------------
   // FORMS - READ
@@ -356,42 +360,96 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
   // FORMS - UPDATE
   // ----------------------------------------------
 
-  updateForm: protectedProcedure
-    .input(
-      z.object({
-        formId: z.string().uuid(),
-        title: z.string().trim().min(1).max(100),
-        description: z.string().trim().max(500).optional(),
+updateForm: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+      title: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(500).optional(),
+      expiresAt: z.coerce.date().nullable().optional(),
+      responseLimit: z.number().int().positive().nullable().optional(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    const [updatedForm] = await db
+      .update(forms)
+      .set({
+        title: input.title,
+        description: input.description,
+        updatedAt: new Date(),
+
+        ...(input.expiresAt !== undefined
+          ? { expiresAt: input.expiresAt }
+          : {}),
+
+        ...(input.responseLimit !== undefined
+          ? { responseLimit: input.responseLimit }
+          : {}),
       })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [updatedForm] = await db
-        .update(forms)
-        .set({
-          title: input.title,
-          description: input.description,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(forms.id, input.formId),
-            eq(forms.ownerId, ctx.session.user.id)
-          )
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
         )
-        .returning();
+      )
+      .returning();
 
-      if (!updatedForm) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Form not found.",
-        });
-      }
+    if (!updatedForm) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found.",
+      });
+    }
 
-      return {
-        message: "Form updated successfully!",
-        form: updatedForm,
-      };
-    }),
+    return {
+      message: "Form updated successfully!",
+      form: updatedForm,
+    };
+  }),
+
+  updateFormLimits: protectedProcedure
+  .input(
+    z.object({
+      formId: z.string().uuid(),
+      expiresAt: z.coerce.date().nullable(),
+      responseLimit: z.number().int().positive().max(1000000).nullable(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    if (input.expiresAt && input.expiresAt <= new Date()) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Expiry date must be in the future.",
+      });
+    }
+
+    const [updatedForm] = await db
+      .update(forms)
+      .set({
+        expiresAt: input.expiresAt,
+        responseLimit: input.responseLimit,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(forms.id, input.formId),
+          eq(forms.ownerId, ctx.session.user.id)
+        )
+      )
+      .returning();
+
+    if (!updatedForm) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Form not found.",
+      });
+    }
+
+    return {
+      message: "Form limits updated successfully!",
+      form: updatedForm,
+    };
+  }),
 
   // ----------------------------------------------
   // FORMS - DELETE
@@ -608,6 +666,8 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
         status: forms.status,
         visibility: forms.visibility,
         publishedAt: forms.publishedAt,
+        expiresAt: forms.expiresAt,
+responseLimit: forms.responseLimit,
       })
       .from(forms)
       .where(
@@ -653,8 +713,33 @@ getResponseAnalytics: protectedProcedure.query(async ({ ctx }) => {
         asc(questions.position)
       );
 
+      const [responseCountResult] = await db
+  .select({
+    total: count(),
+  })
+  .from(responses)
+  .where(eq(responses.formId, form.id));
+
+let availabilityStatus:
+  | "open"
+  | "expired"
+  | "limit_reached" = "open";
+
+if (
+  form.expiresAt &&
+  form.expiresAt.getTime() <= Date.now()
+) {
+  availabilityStatus = "expired";
+} else if (
+  form.responseLimit !== null &&
+  Number(responseCountResult.total) >= form.responseLimit
+) {
+  availabilityStatus = "limit_reached";
+}
+
     return {
       form,
+      availabilityStatus,
       pages:
         pages.length > 0
           ? pages
@@ -856,13 +941,65 @@ submitPublicResponse: publicProcedure
       ? input.answers[emailQuestion.id]
       : null;
 
-    // 6. Save response in database
-    await db.insert(responses).values({
-      formId: form.id,
-      respondentEmail:
-        typeof respondentEmail === "string" ? respondentEmail : null,
-      answers: input.answers,
+    // 6. Atomically check availability and save response.
+await db.transaction(async (tx) => {
+  // Lock the form row so simultaneous submissions
+  // cannot exceed the configured response limit.
+  const [lockedForm] = await tx
+    .select({
+      id: forms.id,
+      status: forms.status,
+      expiresAt: forms.expiresAt,
+      responseLimit: forms.responseLimit,
+    })
+    .from(forms)
+    .where(eq(forms.id, form.id))
+    .for("update")
+    .limit(1);
+
+  if (!lockedForm || lockedForm.status !== "published") {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "This form is no longer available.",
     });
+  }
+
+  if (
+    lockedForm.expiresAt &&
+    lockedForm.expiresAt.getTime() <= Date.now()
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This form has expired and is no longer accepting responses.",
+    });
+  }
+
+  const [currentCount] = await tx
+    .select({
+      total: count(),
+    })
+    .from(responses)
+    .where(eq(responses.formId, lockedForm.id));
+
+  if (
+    lockedForm.responseLimit !== null &&
+    Number(currentCount.total) >= lockedForm.responseLimit
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This form has reached its maximum response limit.",
+    });
+  }
+
+  await tx.insert(responses).values({
+    formId: lockedForm.id,
+    respondentEmail:
+      typeof respondentEmail === "string"
+        ? respondentEmail
+        : null,
+    answers: input.answers,
+  });
+});
 
     return {
       success: true,

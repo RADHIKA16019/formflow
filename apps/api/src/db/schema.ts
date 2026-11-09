@@ -60,6 +60,11 @@ export const forms = pgTable("forms", {
   status: formStatusEnum("status").default("draft").notNull(),
   visibility: formVisibilityEnum("visibility").default("unlisted").notNull(),
   publishedAt: timestamp("published_at"),
+  expiresAt: timestamp("expires_at", {
+  withTimezone: true,
+}),
+
+responseLimit: integer("response_limit"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

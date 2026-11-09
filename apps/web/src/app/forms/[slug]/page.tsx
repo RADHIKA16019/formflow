@@ -356,6 +356,40 @@ function PublicFormContent() {
     );
   }
 
+    // Handle expired forms and forms that reached their response limit.
+  const availabilityStatus = formQuery.data.availabilityStatus;
+
+  if (
+    availabilityStatus === "expired" ||
+    availabilityStatus === "limit_reached"
+  ) {
+    const isExpired = availabilityStatus === "expired";
+
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#EBE2CC] px-5">
+        <div className="w-full max-w-lg rounded-2xl bg-white p-10 text-center shadow-sm">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#EBE2CC] text-3xl">
+            {isExpired ? "⌛" : "✓"}
+          </div>
+
+          <h1 className="mt-6 text-2xl font-bold text-[#302E29]">
+            {isExpired ? "Form Expired" : "Response Limit Reached"}
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-[#777267]">
+            {isExpired
+              ? "This form has expired and is no longer accepting responses."
+              : "This form has reached its maximum response limit and is no longer accepting responses."}
+          </p>
+
+          <p className="mt-6 text-xs text-[#777267]">
+            Powered by FormFlow
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#EBE2CC] px-4 py-12 sm:py-20">
       <div className="mx-auto max-w-2xl">
