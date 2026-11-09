@@ -4,7 +4,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { forms, questions, responses } from "../../db/schema.js";
+import {
+  forms,
+  questions,
+  responses,
+  notifications,
+} from "../../db/schema.js";
 import { protectedProcedure, publicProcedure, t } from "../trpc.js";
 
 export const responsesRouter = t.router({
@@ -100,7 +105,14 @@ export const responsesRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const [form] = await db
-        .select({ id: forms.id })
+        .select({
+  id: forms.id,
+  status: forms.status,
+  expiresAt: forms.expiresAt,
+  responseLimit: forms.responseLimit,
+  ownerId: forms.ownerId,
+  title: forms.title,
+})
         .from(forms)
         .where(
           and(
@@ -268,6 +280,8 @@ export const responsesRouter = t.router({
             status: forms.status,
             expiresAt: forms.expiresAt,
             responseLimit: forms.responseLimit,
+            ownerId: forms.ownerId,
+  title: forms.title,
           })
           .from(forms)
           .where(eq(forms.id, form.id))
@@ -306,14 +320,23 @@ export const responsesRouter = t.router({
           });
         }
 
-        await tx.insert(responses).values({
-          formId: lockedForm.id,
-          respondentEmail:
-            typeof respondentEmail === "string"
-              ? respondentEmail
-              : null,
-          answers: input.answers,
-        });
+        const [newResponse] = await tx
+  .insert(responses)
+  .values({
+    formId: lockedForm.id,
+    respondentEmail:
+      typeof respondentEmail === "string" ? respondentEmail : null,
+    answers: input.answers,
+  })
+  .returning({ id: responses.id });
+
+await tx.insert(notifications).values({
+  userId: lockedForm.ownerId,
+  formId: lockedForm.id,
+  responseId: newResponse.id,
+  title: "New response received",
+  message: `Someone submitted a response to "${lockedForm.title}".`,
+});
       });
 
       return {

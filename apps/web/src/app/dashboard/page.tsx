@@ -69,8 +69,64 @@ export default function DashboardPage() {
     enabled: !!session,
   });
 
+    // Notifications
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  const {
+    data: notificationsList,
+  } = trpc.getNotifications.useQuery(undefined, {
+    enabled: !!session,
+    refetchInterval: 30_000,
+  });
+
+  const {
+    data: unreadCount = 0,
+  } = trpc.getUnreadCount.useQuery(undefined, {
+    enabled: !!session,
+    refetchInterval: 30_000,
+  });
+
   // tRPC utilities
   const utils = trpc.useUtils();
+
+    const markAsReadMutation = trpc.markAsRead.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.getNotifications.invalidate(),
+        utils.getUnreadCount.invalidate(),
+      ]);
+    },
+  });
+
+  const markAllAsReadMutation = trpc.markAllAsRead.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.getNotifications.invalidate(),
+        utils.getUnreadCount.invalidate(),
+      ]);
+    },
+  });
+
+  const handleNotificationClick = (notification: NonNullable<typeof notificationsList>[number]) => {
+    if (!notification.readAt) {
+      markAsReadMutation.mutate(
+        { notificationId: notification.id },
+        {
+          onSuccess: () => {
+            router.push(
+              `/dashboard/forms/${notification.formId}/responses`
+            );
+          },
+        }
+      );
+    } else {
+      router.push(
+        `/dashboard/forms/${notification.formId}/responses`
+      );
+    }
+
+    setIsNotificationsOpen(false);
+  };
 
   // Create form mutation
   const createFormMutation = trpc.createForm.useMutation({
@@ -251,6 +307,111 @@ const deleteFormMutation = trpc.deleteForm.useMutation({
             </div>
 
             <div className="flex items-center gap-3">
+                            {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsNotificationsOpen(!isNotificationsOpen)
+                  }
+                  className="relative flex h-12 w-12 items-center justify-center rounded-xl border border-[#DED6C1] bg-white text-xl transition hover:bg-[#EEEAE0]"
+                  aria-label="Notifications"
+                >
+                  ♧
+
+                  {unreadCount > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {isNotificationsOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-3 w-[min(90vw,380px)] overflow-hidden rounded-2xl border border-[#E8E2D5] bg-white shadow-xl">
+
+                    <div className="flex items-center justify-between border-b border-[#E8E2D5] p-4">
+                      <div>
+                        <h3 className="font-semibold">
+                          Notifications
+                        </h3>
+                        <p className="mt-1 text-xs text-[#969080]">
+                          {unreadCount} unread notifications
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          markAllAsReadMutation.mutate()
+                        }
+                        disabled={
+                          unreadCount === 0 ||
+                          markAllAsReadMutation.isPending
+                        }
+                        className="text-xs font-semibold text-[#756B52] hover:underline disabled:opacity-40"
+                      >
+                        Mark all as read
+                      </button>
+                    </div>
+
+                    <div className="max-h-[380px] overflow-y-auto">
+                      {!notificationsList ||
+                      notificationsList.length === 0 ? (
+                        <div className="p-10 text-center">
+                          <p className="text-3xl">♧</p>
+                          <p className="mt-3 text-sm font-semibold">
+                            No notifications yet
+                          </p>
+                          <p className="mt-1 text-xs text-[#969080]">
+                            New form responses will appear here.
+                          </p>
+                        </div>
+                      ) : (
+                        notificationsList.map((notification) => (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() =>
+                              handleNotificationClick(notification)
+                            }
+                            className={`w-full border-b border-[#F0EDE4] p-4 text-left transition hover:bg-[#F8F6F0] ${
+                              !notification.readAt
+                                ? "bg-[#F8F6F0]"
+                                : "bg-white"
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className="mt-1 text-lg">
+                                {notification.readAt ? "○" : "●"}
+                              </span>
+
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold">
+                                  {notification.title}
+                                </p>
+
+                                <p className="mt-1 text-xs text-[#716C60]">
+                                  {notification.message}
+                                </p>
+
+                                <p className="mt-2 text-xs font-medium text-[#969080]">
+                                  {notification.formTitle}
+                                </p>
+
+                                <p className="mt-1 text-[11px] text-[#A39D90]">
+                                  {new Date(
+                                    notification.createdAt
+                                  ).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setIsCreateModalOpen(true)}

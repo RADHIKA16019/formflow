@@ -167,3 +167,38 @@ export const responses = pgTable("responses", {
   answers: jsonb("answers").notNull(),
   submittedAt: timestamp("submitted_at").defaultNow().notNull(),
 });
+
+// Notifications table
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+
+    formId: uuid("form_id")
+      .notNull()
+      .references(() => forms.id, { onDelete: "cascade" }),
+
+    responseId: uuid("response_id")
+      .notNull()
+      .references(() => responses.id, { onDelete: "cascade" }),
+
+    title: text("title").notNull(),
+
+    message: text("message").notNull(),
+
+    readAt: timestamp("read_at"),
+
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("notifications_response_unique").on(
+      table.responseId
+    ),
+  ]
+);

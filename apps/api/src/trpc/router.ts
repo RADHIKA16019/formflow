@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import { publicProcedure, protectedProcedure, t } from "./trpc.js";
-
+import { notificationsRouter } from "./routers/notifications.js";
 import { formsRouter } from "./routers/forms.js";
 import { questionsRouter } from "./routers/questions.js";
 import { pagesRouter } from "./routers/pages.js";
@@ -31,6 +31,7 @@ const generalRouter = t.router({
   })),
 });
 
+
 export const appRouter = t.mergeRouters(
   generalRouter,
   formsRouter,
@@ -38,7 +39,8 @@ export const appRouter = t.mergeRouters(
   pagesRouter,
   responsesRouter,
   analyticsRouter,
-  publicFormsRouter
+  publicFormsRouter,
+  notificationsRouter
 );
 
 export type AppRouter = typeof appRouter;
