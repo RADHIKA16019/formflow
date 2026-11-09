@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import FormLimitsSettings from "@/components/form-limits-settings";
 import FormThemeSettings, {
   type FormTheme,
@@ -49,7 +49,7 @@ import {
 export default function FormBuilder() {
   const params = useParams<{ formId: string }>();
   const formId = params.formId;
-
+  const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isLinkCopied, setIsLinkCopied] = useState(false);
@@ -95,6 +95,12 @@ export default function FormBuilder() {
   );
 
   const utils = trpc.useUtils();
+  const deleteFormMutation = trpc.deleteForm.useMutation({
+  onSuccess: async () => {
+    await utils.getMyForms.invalidate();
+    router.push("/dashboard/forms");
+  },
+});
 
   const {
     data: form,
@@ -490,6 +496,15 @@ const availableLogicQuestions = questionList.slice(
       deleteQuestionMutation.mutate({ questionId });
     }
   };
+  const handleDeleteForm = () => {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${form?.title ?? "this form"}"? All associated form data may also be affected. This action cannot be undone.`
+  );
+
+  if (confirmed) {
+    deleteFormMutation.mutate({ formId });
+  }
+};
 
   const handleQuestionDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -713,6 +728,14 @@ const availableLogicQuestions = questionList.slice(
           >
             View Responses →
           </button>
+          <button
+  type="button"
+  onClick={handleDeleteForm}
+  disabled={deleteFormMutation.isPending}
+  className="rounded-lg border border-red-200 px-5 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+>
+  {deleteFormMutation.isPending ? "Deleting..." : "Delete Form"}
+</button>
         </div>
       </header>
 
@@ -748,11 +771,13 @@ const availableLogicQuestions = questionList.slice(
 
       {(publishMutation.isError ||
         unpublishMutation.isError ||
-        visibilityMutation.isError) && (
+        visibilityMutation.isError ||
+  deleteFormMutation.isError ) && (
         <p className="px-6 pt-3 text-sm text-red-600 sm:px-10">
           {publishMutation.error?.message ||
             unpublishMutation.error?.message ||
-            visibilityMutation.error?.message}
+            visibilityMutation.error?.message ||
+            deleteFormMutation.error?.message}
         </p>
       )}
 
